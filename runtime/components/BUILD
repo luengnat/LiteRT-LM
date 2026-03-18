@@ -16,6 +16,7 @@
 # [Google-internal load of `cc_library`]
 # [Google-internal load of `cc_shared_library`]
 # [Google-internal load of `cc_test`]
+# [Google-internal load of `objc_library`]
 load(
     "@litert//litert/build_common:litert_build_defs.bzl",
     "export_lrt_runtime_only_linkopt",
@@ -377,7 +378,11 @@ cc_library(
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
         ],
         "//conditions:default": [
+            "@litert//litert/c:litert_common",
+            "@litert//litert/cc:litert_environment",
+            "@litert//litert/cc:litert_environment_options",
             "@litert//litert/cc:litert_tensor_buffer",
+            "@litert//litert/cc/internal:litert_handle",
         ],
     }),
 )
@@ -389,9 +394,7 @@ cc_library(
     deps = select({
         # If CAPI is linked dynamically, need to link the sampler dynamically as well.
         "@litert//litert:litert_link_capi_so": [],
-        "@platforms//os:ios": [],
-        "//conditions:default": [
-        ],
+        "//conditions:default": [],
     }) + select({
         "//conditions:default": [],
     }),
