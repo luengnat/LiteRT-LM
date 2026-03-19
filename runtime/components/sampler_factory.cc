@@ -370,7 +370,8 @@ class TopKOpenClCApiSampler : public TopKCApiSampler {
         return capi_or.status();
       }
       ABSL_LOG(WARNING) << "OpenCL sampler not available, falling back to "
-                           "statically linked C API: " << capi_or.status();
+                           "statically linked C API: "
+                        << capi_or.status();
       auto static_capi_or = GetStaticTopKOpenClSamplerCApi();
       if (!static_capi_or.ok()) {
         return capi_or.status();
@@ -445,7 +446,8 @@ class TopKWebGpuCApiSampler : public TopKCApiSampler {
         return capi_or.status();
       }
       ABSL_LOG(WARNING) << "WebGPU sampler not available, falling back to "
-                           "statically linked C API: " << capi_or.status();
+                           "statically linked C API: "
+                        << capi_or.status();
       auto static_capi_or = GetStaticTopKWebGpuSamplerCApi();
       if (!static_capi_or.ok()) {
         return capi_or.status();
@@ -584,7 +586,7 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateCpuSampler(
     case proto::SamplerParameters::TOP_P:
       return TopPSampler::Create(sampler_params.k(), sampler_params.p(),
                                  sampler_params.temperature(), batch_size,
-                                 sampler_params.seed());
+                                 /*sequence_size=*/1, sampler_params.seed());
     default:
       return absl::UnimplementedError(absl::StrCat(
           "Sampler type: ", sampler_params.type(), " not implemented yet."));
@@ -661,7 +663,7 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateGpuSampler(
   }
   ABSL_LOG(INFO)
       << "WebGPU sampler not available, falling back to other sampler options.";
-#endif  // LITERT_HAS_WEBGPU_SUPPORT
+#endif                         // LITERT_HAS_WEBGPU_SUPPORT
 
 #if LITERT_HAS_OPENCL_SUPPORT  // NOLINT(misc-include-cleaner)
   auto opencl_sampler = TopKOpenClCApiSampler::Create(
@@ -672,8 +674,8 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateGpuSampler(
   }
   ABSL_LOG(INFO)
       << "OpenCL sampler not available, falling back to other sampler options.";
-#endif  // LITERT_HAS_OPENCL_SUPPORT
-#endif  // !__ANDROID__
+#endif                         // LITERT_HAS_OPENCL_SUPPORT
+#endif                         // !__ANDROID__
 
   return absl::UnavailableError("GPU sampler not available.");
 }

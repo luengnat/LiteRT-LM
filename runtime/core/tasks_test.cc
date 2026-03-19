@@ -876,8 +876,9 @@ TEST_F(TasksCustomSamplingTest, PrefillTooLong) {
 }
 
 TEST_F(TasksCustomSamplingTest, DecodeCustomSampling) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -937,8 +938,9 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSampling) {
 }
 
 TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingWithConstrainedDecoding) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1004,10 +1006,11 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingWithConstrainedDecoding) {
 
 TEST_F(TasksCustomSamplingTest,
        DecodeCustomSamplingWithPartialBytePairEncodingTokens) {
-  ASSERT_OK_AND_ASSIGN(auto sampler,
-                       TopPSampler::Create(/*k=*/1, /*p=*/0.5,
-                                           /*temperature=*/0.0,
-                                           /*batch_size=*/2, /*seed=*/1));
+  ASSERT_OK_AND_ASSIGN(
+      auto sampler,
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5,
+                          /*temperature=*/0.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1));
 
   // <432, 416> --> "km²"
   // <432, 414> --> "°"
@@ -1040,15 +1043,13 @@ TEST_F(TasksCustomSamplingTest,
   std::vector<std::string> step_results;
   absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback = nullptr;
 
-  ASSERT_OK_AND_ASSIGN(auto task_responses, Tasks::Decode(
-                                                executor, *gemma3_tokenizer_,
-                                                stop_token_detector,
-                                                /*num_output_candidates=*/2,
-                                                benchmark_info, sampler.get(),
-                                                /*constraint=*/nullptr,
-                                                std::move(decoded_ids.Value()),
-                                                /*callback=*/callback,
-                                                /*cancelled=*/nullptr));
+  ASSERT_OK_AND_ASSIGN(
+      auto task_responses,
+      Tasks::Decode(executor, *gemma3_tokenizer_, stop_token_detector,
+                    /*num_output_candidates=*/2, benchmark_info, sampler.get(),
+                    /*constraint=*/nullptr, std::move(decoded_ids.Value()),
+                    /*callback=*/callback,
+                    /*cancelled=*/nullptr));
 
   EXPECT_EQ(task_responses.GetTaskState(), TaskState::kDone);
   EXPECT_EQ(task_responses.GetTexts().size(), 2);
@@ -1221,8 +1222,9 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingReachMaxNumTokens) {
       executor, inputs, /*wait_for_completion=*/true, benchmark_info);
   EXPECT_OK(prefill_responses);
 
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1248,8 +1250,9 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingReachMaxNumTokens) {
 }
 
 TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingStreaming) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1343,8 +1346,9 @@ TEST_F(TasksCustomSamplingTest,
       executor, inputs, /*wait_for_completion=*/true, benchmark_info);
   EXPECT_OK(prefill_responses);
 
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1378,8 +1382,9 @@ TEST_F(TasksCustomSamplingTest,
 }
 
 TEST_F(TasksCustomSamplingTest, DecodeComplexStopTokenDetector) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1482,8 +1487,9 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingStreamingWithCancellation) {
   // Set the delay long enough not to be flaky.
   delayed_executor.SetDecodeDelay(absl::Milliseconds(1000));
 
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1529,8 +1535,9 @@ TEST_F(TasksCustomSamplingTest, DecodeCustomSamplingStreamingWithCancellation) {
 
 TEST_F(TasksCustomSamplingTest,
        DecodeCustomSamplingStreamingWithConstrainedDecoding) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5, /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
@@ -1592,9 +1599,10 @@ TEST_F(TasksCustomSamplingTest,
 }
 
 TEST_F(TasksCustomSamplingTest, DecodeStopTokenAndBPEDetector) {
-  auto sampler_or = TopPSampler::Create(/*k=*/1, /*p=*/0.5,
-                                        /*temperature=*/1.0,
-                                        /*batch_size=*/2, /*seed=*/1);
+  auto sampler_or =
+      TopPSampler::Create(/*k=*/1, /*p=*/0.5,
+                          /*temperature=*/1.0,
+                          /*batch_size=*/2, /*sequence_size=*/1, /*seed=*/1);
   EXPECT_TRUE(sampler_or.ok());
   std::unique_ptr<TopPSampler> sampler = std::move(sampler_or.value());
 
