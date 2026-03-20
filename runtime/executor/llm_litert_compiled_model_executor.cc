@@ -1839,6 +1839,10 @@ LlmLiteRtCompiledModelExecutorStatic::Create(
         LITERT_ASSIGN_OR_RETURN(auto output_buffer,
                                 compiled_model.CreateOutputBuffer(
                                     prefill_signature_key, output_name));
+        if (clear_kv_cache_before_prefill &&
+            gpu_optimized_single_buffer_cache) {
+          LITERT_RETURN_IF_ERROR(output_buffer.Clear());
+        }
         output_kv_cache_buffers[output_name] = std::move(output_buffer);
       }
       // For CPU, we will use single buffer for kv cache input and output to
