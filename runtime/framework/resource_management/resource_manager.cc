@@ -771,7 +771,8 @@ absl::Status ResourceManager::TryLoadingAudioExecutor() {
   if (!audio_executor_settings_) {
     return absl::InvalidArgumentError("Audio options should not be null.");
   }
-  if (audio_executor_settings_->GetBackend() == litert::lm::Backend::CPU) {
+  if (audio_executor_settings_->GetBackend() == litert::lm::Backend::CPU ||
+      audio_executor_settings_->GetBackend() == litert::lm::Backend::GPU) {
     return absl::InvalidArgumentError(
         "Audio executor backend is not supported.");
   } else if (audio_executor_settings_->GetBackend() ==

@@ -15,14 +15,22 @@
 #include "runtime/executor/common_utils.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"  // from @com_google_absl
+#include "litert/cc/litert_element_type.h"  // from @litert
+#include "litert/cc/litert_environment.h"  // from @litert
+#include "litert/cc/litert_layout.h"  // from @litert
+#include "litert/cc/litert_ranked_tensor_type.h"  // from @litert
+#include "litert/cc/litert_tensor_buffer.h"  // from @litert
+#include "litert/cc/litert_tensor_buffer_types.h"  // from @litert
+#include "litert/test/matchers.h"  // from @litert
 #include "runtime/util/test_utils.h"  // IWYU pragma: keep
 
-namespace litert::lm::executor::utils {
+namespace litert::lm {
 namespace {
 
 using ::testing::status::StatusIs;
@@ -112,5 +120,126 @@ TEST(CommonUtilsTest, ExpandBufferNoExpansionAxis) {
                    sizeof(int)),
       StatusIs(absl::StatusCode::kInvalidArgument, "No expansion axis found."));
 }
+
+TEST(CommonUtilsTest, CopyBufferSuccess) {
+  LITERT_ASSERT_OK_AND_ASSIGN(auto env, ::litert::Environment::Create({}));
+  auto layout = ::litert::Layout(::litert::Dimensions({4}));
+  RankedTensorType ranked_tensor_type(ElementType::Int32, std::move(layout));
+  auto src_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(src_buffer);
+  auto dst_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(dst_buffer);
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *src_buffer, litert::TensorBuffer::LockMode::kWrite);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    ptr[0] = 1;
+    ptr[1] = 2;
+    ptr[2] = 3;
+    ptr[3] = 4;
+  }
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *dst_buffer, litert::TensorBuffer::LockMode::kWrite);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    ptr[0] = 0;
+    ptr[1] = 0;
+    ptr[2] = 0;
+    ptr[3] = 0;
+  }
+
+  ASSERT_OK(CopyBuffer(*src_buffer, *dst_buffer, /*src_offset=*/0,
+                       /*dst_offset=*/0, /*size=*/-1));
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *dst_buffer, litert::TensorBuffer::LockMode::kRead);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    EXPECT_EQ(ptr[0], 1);
+    EXPECT_EQ(ptr[1], 2);
+    EXPECT_EQ(ptr[2], 3);
+    EXPECT_EQ(ptr[3], 4);
+  }
+}
+
+TEST(CommonUtilsTest, CopyBufferWithOffsetsAndSize) {
+  LITERT_ASSERT_OK_AND_ASSIGN(auto env, ::litert::Environment::Create({}));
+  auto layout = ::litert::Layout(::litert::Dimensions({4}));
+  RankedTensorType ranked_tensor_type(ElementType::Int32, std::move(layout));
+  auto src_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(src_buffer);
+  auto dst_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(dst_buffer);
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *src_buffer, litert::TensorBuffer::LockMode::kWrite);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    ptr[0] = 1;
+    ptr[1] = 2;
+    ptr[2] = 3;
+    ptr[3] = 4;
+  }
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *dst_buffer, litert::TensorBuffer::LockMode::kWrite);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    ptr[0] = 0;
+    ptr[1] = 0;
+    ptr[2] = 0;
+    ptr[3] = 0;
+  }
+
+  // Copy 2 ints (8 bytes) starting from src_offset=4 (second element)
+  // to dst_offset=8 (third element).
+  ASSERT_OK(CopyBuffer(*src_buffer, *dst_buffer, /*src_offset=*/4,
+                       /*dst_offset=*/8, /*size=*/8));
+
+  {
+    auto lock = litert::TensorBufferScopedLock::Create(
+        *dst_buffer, litert::TensorBuffer::LockMode::kRead);
+    ASSERT_TRUE(lock);
+    int* ptr = static_cast<int*>(lock->second);
+    EXPECT_EQ(ptr[0], 0);
+    EXPECT_EQ(ptr[1], 0);
+    EXPECT_EQ(ptr[2], 2);
+    EXPECT_EQ(ptr[3], 3);
+  }
+}
+
+TEST(CommonUtilsTest, CopyBufferOutOfBoundsSize) {
+  LITERT_ASSERT_OK_AND_ASSIGN(auto env, ::litert::Environment::Create({}));
+  auto layout = ::litert::Layout(::litert::Dimensions({4}));
+  RankedTensorType ranked_tensor_type(ElementType::Int32, std::move(layout));
+  auto src_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(src_buffer);
+  auto dst_buffer =
+      TensorBuffer::CreateManaged(env, ::litert::TensorBufferType::kHostMemory,
+                                  ranked_tensor_type, sizeof(int) * 4);
+  ASSERT_TRUE(dst_buffer);
+
+  EXPECT_THAT(CopyBuffer(*src_buffer, *dst_buffer, /*src_offset=*/0,
+                         /*dst_offset=*/0, /*size=*/20),
+              StatusIs(absl::StatusCode::kUnknown));
+}
+
 }  // namespace
-}  // namespace litert::lm::executor::utils
+}  // namespace litert::lm

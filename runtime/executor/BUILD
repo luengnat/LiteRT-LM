@@ -779,6 +779,7 @@ cc_library(
         ":audio_executor",
         ":audio_executor_settings",
         ":audio_executor_utils",
+        ":common_utils",
         ":executor_settings_base",
         ":litert_compiled_model_executor_utils",
         ":llm_executor_io_types",
@@ -999,17 +1000,41 @@ cc_library(
     deps = [
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",
+        "@litert//litert/cc:litert_macros",
         "//runtime/util:litert_status_util",
-    ],
+    ] + select({
+        "@litert//litert:litert_link_capi_so": [
+            "@litert//litert/cc:litert_api_with_dynamic_runtime",
+        ],
+        "//conditions:default": [
+            "@litert//litert/cc:litert_tensor_buffer",
+        ],
+    }),
 )
 
 cc_test(
     name = "common_utils_test",
     srcs = ["common_utils_test.cc"],
+    tags = ["requires-mac-inputs:hard"],  # Required for running on Forge on Mac.
     deps = [
         ":common_utils",
         "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/status",
+        "@litert//litert/test:matchers",
         "//runtime/util:test_utils",
-    ],
+    ] + select({
+        "@litert//litert:litert_link_capi_so": [
+            "@litert//litert/cc:litert_api_with_dynamic_runtime",
+        ],
+        "//conditions:default": [
+            "@litert//litert/cc:litert_element_type",
+            "@litert//litert/cc:litert_environment",
+            "@litert//litert/cc:litert_layout",
+            "@litert//litert/cc:litert_macros",
+            "@litert//litert/cc:litert_model",
+            "@litert//litert/cc:litert_ranked_tensor_type",
+            "@litert//litert/cc:litert_tensor_buffer",
+            "@litert//litert/cc:litert_tensor_buffer_types",
+        ],
+    }),
 )

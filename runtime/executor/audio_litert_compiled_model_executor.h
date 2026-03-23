@@ -312,7 +312,7 @@ class AudioLiteRtCompiledModelExecutor : public AudioExecutor {
 
     // Swap the internal state buffers between input and output buffers map, so
     // the previous state will be used for the current state.
-    void SwapInternalStateBuffers();
+    absl::Status SwapInternalStateBuffers();
 
     absl::Status ClearInputBuffers() override;
 
