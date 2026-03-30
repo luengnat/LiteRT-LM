@@ -22,11 +22,16 @@ import subprocess
 import click
 
 import litert_lm
+from litert_lm_cli import help_formatter
 from litert_lm_cli import model
 from litert_lm_cli import venv_manager
 
 
-@click.group(context_settings=dict(show_default=True, max_content_width=120))
+@click.group(
+    cls=help_formatter.ColorGroup,
+    name="litert-lm",
+    context_settings=dict(show_default=True, max_content_width=120),
+)
 def cli():
   """CLI tool for LiteRT-LM models."""
 

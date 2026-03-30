@@ -33,6 +33,25 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
+    name = "help_formatter",
+    srcs = ["help_formatter.py"],
+    deps = [requirement("click")],
+    imports = [".."],
+)
+
+py_test(
+    name = "help_formatter_test",
+    srcs = ["help_formatter_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":help_formatter",
+        "@absl_py//absl/testing:absltest",
+        requirement("click"),
+    ],
+    imports = [".."],
+)
+
+pytype_strict_library(
     name = "venv_manager",
     srcs = ["venv_manager.py"],
     imports = [".."],
@@ -59,6 +78,7 @@ pytype_strict_binary(
         "nowindows",
     ],
     deps = [
+        ":help_formatter",
         ":model",
         ":venv_manager",
         "//python/litert_lm",
