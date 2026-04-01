@@ -43,6 +43,7 @@
 #include "runtime/executor/kv_cache_interface.h"
 #include "runtime/executor/litert_compiled_model_executor_utils.h"
 #include "runtime/util/status_macros.h"
+#include "runtime/util/tensor_buffer_util.h"
 
 namespace litert::lm {
 
@@ -374,6 +375,50 @@ absl::Status LitertKVCache::BroadcastAndCopyFrom(KVCacheInterface& other) {
   }
 
   return absl::OkStatus();
+}
+
+absl::StatusOr<std::unique_ptr<KVCacheInterface>> LitertKVCache::DeepCopy()
+    const {
+  absl::flat_hash_map<std::string, TensorBuffer> bank_1_key_cache_buffers;
+  for (const auto& [name, buffer] : bank_1_key_cache_buffers_) {
+    LITERT_ASSIGN_OR_RETURN(bank_1_key_cache_buffers[name],
+                            CopyTensorBuffer(env_, buffer));
+  }
+  absl::flat_hash_map<std::string, TensorBuffer> bank_1_value_cache_buffers;
+  for (const auto& [name, buffer] : bank_1_value_cache_buffers_) {
+    LITERT_ASSIGN_OR_RETURN(bank_1_value_cache_buffers[name],
+                            CopyTensorBuffer(env_, buffer));
+  }
+
+  std::optional<absl::flat_hash_map<std::string, TensorBuffer>>
+      bank_2_key_cache_buffers;
+  if (bank_2_key_cache_buffers_.has_value()) {
+    bank_2_key_cache_buffers.emplace();
+    auto& map = *bank_2_key_cache_buffers;
+    for (const auto& [name, buffer] : *bank_2_key_cache_buffers_) {
+      LITERT_ASSIGN_OR_RETURN(map[name], CopyTensorBuffer(env_, buffer));
+    }
+  }
+
+  std::optional<absl::flat_hash_map<std::string, TensorBuffer>>
+      bank_2_value_cache_buffers;
+  if (bank_2_value_cache_buffers_.has_value()) {
+    bank_2_value_cache_buffers.emplace();
+    auto& map = *bank_2_value_cache_buffers;
+    for (const auto& [name, buffer] : *bank_2_value_cache_buffers_) {
+      LITERT_ASSIGN_OR_RETURN(map[name], CopyTensorBuffer(env_, buffer));
+    }
+  }
+
+  auto copy = absl::WrapUnique(new LitertKVCache(
+      batch_size_, num_entries_, k_dynamic_dim_, v_dynamic_dim_, env_,
+      std::move(bank_1_key_cache_buffers),
+      std::move(bank_1_value_cache_buffers),
+      std::move(bank_2_key_cache_buffers),
+      std::move(bank_2_value_cache_buffers)));
+  copy->bank_1_is_input_ = bank_1_is_input_;
+
+  return copy;
 }
 
 absl::Status LitertKVCache::Resize(int num_entries) {

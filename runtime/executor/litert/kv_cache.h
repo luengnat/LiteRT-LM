@@ -55,6 +55,8 @@ class LitertKVCache : public KVCacheInterface {
 
   absl::Status BroadcastAndCopyFrom(KVCacheInterface& other) override;
 
+  absl::StatusOr<std::unique_ptr<KVCacheInterface>> DeepCopy() const override;
+
   // Resizes the KV cache to the given number of entries (sequence length).
   // Note: Resize is a no-op if the requested size is smaller than the current
   // size.

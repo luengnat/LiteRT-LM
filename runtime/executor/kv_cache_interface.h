@@ -15,6 +15,7 @@
 #ifndef THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_KV_CACHE_INTERFACE_H_
 #define THIRD_PARTY_ODML_LITERT_LM_RUNTIME_EXECUTOR_KV_CACHE_INTERFACE_H_
 
+#include <memory>
 #include <string>
 
 #include "absl/status/status.h"  // from @com_google_absl
@@ -55,6 +56,10 @@ class KVCacheInterface {
   //   This has shape [3, ...] and other has shape [1, ...]. Then we can copy
   //   other[0, :, ...] -> this[0, :, ...], this[1, :, ...], this[2, :, ...].
   virtual absl::Status BroadcastAndCopyFrom(KVCacheInterface& other) = 0;
+
+  // Deep copies the KV cache. This is an expensive operation. Use sparingly.
+  virtual absl::StatusOr<std::unique_ptr<KVCacheInterface>> DeepCopy()
+      const = 0;
 };
 
 }  // namespace litert::lm

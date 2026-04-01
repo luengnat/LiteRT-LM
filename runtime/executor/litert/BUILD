@@ -38,6 +38,7 @@ cc_library(
         "//runtime/executor:kv_cache_interface",
         "//runtime/executor:litert_compiled_model_executor_utils",
         "//runtime/util:litert_status_util",
+        "//runtime/util:tensor_buffer_util",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
