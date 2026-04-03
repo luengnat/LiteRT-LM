@@ -42,6 +42,7 @@ from litert_lm_cli import version
 def cli():
   """CLI tool for LiteRT-LM models."""
 
+
 @cli.command(name="list")
 def list_models():
   """Lists all imported LiteRT-LM models."""
@@ -432,6 +433,16 @@ def benchmark(
         " instructions."
     ),
 )
+@click.option(
+    "--no-template",
+    is_flag=True,
+    default=False,
+    help=(
+        "Interact with the model directly without applying prompt templates."
+        " That means the input should include all control tokens for the model"
+        " expected."
+    ),
+)
 @common_inference_options
 def run(
     model_reference,
@@ -441,6 +452,7 @@ def run(
     android=False,
     enable_speculative_decoding=None,
     verbose=False,
+    no_template=False,
     from_huggingface_repo=None,
     huggingface_token=None,
 ):
@@ -458,6 +470,8 @@ def run(
     enable_speculative_decoding: Speculative decoding mode (True, False, or None
       for auto).
     verbose: Whether to enable verbose logging.
+    no_template: Interact with the model directly without applying prompt
+      templates or stripping stop tokens.
     from_huggingface_repo: The HuggingFace repository ID.
     huggingface_token: The HuggingFace API token.
   """
@@ -520,6 +534,7 @@ def run(
       backend=backend,
       preset=preset,
       enable_speculative_decoding=enable_speculative_decoding,
+      no_template=no_template,
   )
 
 

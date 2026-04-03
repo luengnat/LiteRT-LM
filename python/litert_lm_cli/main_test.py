@@ -18,8 +18,10 @@ import unittest.mock
 
 from absl.testing import absltest
 from click.testing import CliRunner
+from prompt_toolkit import key_binding
 
 from litert_lm_cli import main
+from litert_lm_cli import model
 
 
 class MainTest(absltest.TestCase):
@@ -95,6 +97,26 @@ class MainTest(absltest.TestCase):
     self.assertEqual(result.exit_code, 0)
     # Should return early and not start the interactive session
     mock_model.run_interactive.assert_not_called()
+
+  def test_create_keybindings(self):
+    m = model.Model(model_id="test_model", model_path="test_path")
+    kb = m._create_keybindings()
+    self.assertIsInstance(kb, key_binding.KeyBindings)
+    # Check if expected keys are added.
+    keys = [str(b.keys) for b in kb.bindings]
+    # Check if enter (ControlM), c-j (ControlJ), esc+enter, c-c (ControlC).
+    self.assertTrue(any("ControlM" in k and "Escape" not in k for k in keys))
+    self.assertTrue(any("ControlJ" in k for k in keys))
+    self.assertTrue(any("Escape" in k and "ControlM" in k for k in keys))
+    self.assertTrue(any("ControlC" in k for k in keys))
+
+  def test_run_no_template_flag(self):
+    runner = CliRunner()
+    # Test that --no-template is a valid option for the run command.
+    # We use --help to avoid actually running the model.
+    result = runner.invoke(main.cli, ["run", "--help"])
+    self.assertEqual(result.exit_code, 0)
+    self.assertIn("--no-template", result.output)
 
 
 if __name__ == "__main__":
