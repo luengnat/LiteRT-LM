@@ -14,13 +14,20 @@
 
 #include "runtime/util/litert_lm_loader.h"
 
+#include <cstdint>
 #include <filesystem>  // NOLINT: Required for path manipulation.
+#include <fstream>
+#include <ios>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"  // from @com_google_absl
+#include "flatbuffers/buffer.h"  // from @flatbuffers
+#include "flatbuffers/flatbuffer_builder.h"  // from @flatbuffers
 #include "runtime/components/model_resources.h"
 #include "runtime/util/memory_mapped_file.h"
 #include "runtime/util/scoped_file.h"
@@ -32,6 +39,62 @@ namespace litert::lm {
 namespace {
 
 using ::testing::status::StatusIs;
+
+void WriteDummyModelFile(
+    const std::string& path,
+    flatbuffers::Offset<schema::LiteRTLMMetaData> metadata_offset,
+    flatbuffers::FlatBufferBuilder& builder) {
+  builder.Finish(metadata_offset);
+  std::ofstream file(path, std::ios::binary);
+  // Write magic number
+  file.write("LITERTLM", 8);
+  // Write major version
+  uint32_t major_version = 1;
+  file.write(reinterpret_cast<const char*>(&major_version), sizeof(uint32_t));
+  // Write minor version
+  uint32_t minor_version = 0;
+  file.write(reinterpret_cast<const char*>(&minor_version), sizeof(uint32_t));
+  // Write patch version
+  uint32_t patch_version = 0;
+  file.write(reinterpret_cast<const char*>(&patch_version), sizeof(uint32_t));
+  // Write 4 bytes of padding
+  uint32_t padding = 0;
+  file.write(reinterpret_cast<const char*>(&padding), sizeof(uint32_t));
+  // Write header end offset (32 + metadata size)
+  uint64_t header_end_offset = 32 + builder.GetSize();
+  file.write(reinterpret_cast<const char*>(&header_end_offset),
+             sizeof(uint64_t));
+  // Write metadata
+  file.write(reinterpret_cast<const char*>(builder.GetBufferPointer()),
+             builder.GetSize());
+}
+
+TEST(LitertLmLoaderTest, InitializeWithInvalidOffsets) {
+  auto test_file_path =
+      std::filesystem::path(::testing::TempDir()) / "invalid_offsets.litertlm";
+
+  flatbuffers::FlatBufferBuilder builder(1024);
+  auto section_object = schema::CreateSectionObject(
+      builder, 0, 100, 50,
+      schema::AnySectionDataType_TFLiteModel);  // begin > end
+  std::vector<flatbuffers::Offset<schema::SectionObject>> sections;
+  sections.push_back(section_object);
+  auto sections_vector = builder.CreateVector(sections);
+  auto section_metadata =
+      schema::CreateSectionMetadata(builder, sections_vector);
+  auto metadata = schema::CreateLiteRTLMMetaData(builder, 0, section_metadata);
+
+  WriteDummyModelFile(test_file_path.string(), metadata, builder);
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<MemoryMappedFile> mapped_file,
+                       MemoryMappedFile::Create(test_file_path.string()));
+
+  auto shared_mapped_file =
+      std::shared_ptr<MemoryMappedFile>(std::move(mapped_file));
+  EXPECT_THAT(LitertLmLoader::Create(shared_mapped_file),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       ::testing::HasSubstr("invalid offsets")));
+}
 
 TEST(LitertLmLoaderTest, GetSectionLocationNotFound) {
   const auto model_path =
