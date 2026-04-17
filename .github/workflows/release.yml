@@ -1,0 +1,304 @@
+name: "Release"
+
+on:
+  push:
+    tags:
+      - v*.*.*
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-x64:
+    name: "Build Linux x86_64"
+    runs-on: LiteRT_Linux_x64
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout code.
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up cache keys.
+        id: cache-keys
+        run: |
+          CACHE_RESTORE_KEY_2="release-linux-x64"
+          CACHE_RESTORE_KEY_1="$CACHE_RESTORE_KEY_2-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}"
+          CACHE_RESTORE_KEY_0="$CACHE_RESTORE_KEY_1-${{ hashFiles('**/BUILD*') }}"
+          CACHE_KEY="$CACHE_RESTORE_KEY_0-${{ github.sha }}"
+          echo "CACHE_RESTORE_KEY_2=$CACHE_RESTORE_KEY_2" >> "$GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_1=$CACHE_RESTORE_KEY_1" >> "$GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_0=$CACHE_RESTORE_KEY_0" >> "$GITHUB_OUTPUT"
+          echo "CACHE_KEY=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Restore bazel cache.
+        id: bazel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/bazel-linux-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
+          restore-keys: |
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_0 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_1 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_2 }}-
+
+      - name: Run bazel build with dynamic linking.
+        run: |
+          bazel build --disk_cache=~/.cache/bazel-linux-release --config=linux_x86_64 \
+            --define=litert_link_capi_so=true \
+            --define=resolve_symbols_in_exec=false \
+            //runtime/engine:litert_lm_main
+
+      - name: Package release archive.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGING="litert-lm-${VERSION}-linux-x86_64"
+          mkdir -p "${STAGING}/bin" "${STAGING}/lib" "${STAGING}/include"
+
+          # Copy executable
+          cp bazel-bin/runtime/engine/litert_lm_main "${STAGING}/bin/"
+
+          # Copy prebuilt shared libraries
+          cp prebuilt/linux_x86_64/libLiteRt.so "${STAGING}/lib/"
+          cp prebuilt/linux_x86_64/libLiteRtWebGpuAccelerator.so "${STAGING}/lib/"
+          cp prebuilt/linux_x86_64/libLiteRtTopKWebGpuSampler.so "${STAGING}/lib/"
+          cp prebuilt/linux_x86_64/libGemmaModelConstraintProvider.so "${STAGING}/lib/"
+
+          # Copy headers
+          cp -r runtime "${STAGING}/include/"
+          find "${STAGING}/include/runtime" -name "*.cc" -delete
+          find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -type d -empty -delete
+
+          # Create tarball
+          tar czf "${STAGING}.tar.gz" "${STAGING}"
+          echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release.
+        run: gh release upload ${GITHUB_REF_NAME} ${STAGING}.tar.gz --clobber
+
+      - name: Save bazel cache.
+        uses: actions/cache/save@v4
+        if: steps.bazel-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/bazel-linux-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
+
+  build-linux-arm64:
+    name: "Build Linux ARM64"
+    runs-on: ubuntu-22.04_ARM64-8core
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Install dependencies.
+        run: sudo apt-get update && sudo apt-get install -y git-lfs
+
+      - name: Checkout code.
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Run bazel build with dynamic linking.
+        run: |
+          bazel build \
+            --config=linux_arm64 \
+            --define=litert_link_capi_so=true \
+            --define=resolve_symbols_in_exec=false \
+            //runtime/engine:litert_lm_main
+
+      - name: Package release archive.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGING="litert-lm-${VERSION}-linux-arm64"
+          mkdir -p "${STAGING}/bin" "${STAGING}/lib" "${STAGING}/include"
+
+          # Copy executable
+          cp bazel-bin/runtime/engine/litert_lm_main "${STAGING}/bin/"
+
+          # Copy prebuilt shared libraries
+          cp prebuilt/linux_arm64/libLiteRt.so "${STAGING}/lib/"
+          cp prebuilt/linux_arm64/libLiteRtWebGpuAccelerator.so "${STAGING}/lib/"
+          cp prebuilt/linux_arm64/libLiteRtTopKWebGpuSampler.so "${STAGING}/lib/"
+          cp prebuilt/linux_arm64/libGemmaModelConstraintProvider.so "${STAGING}/lib/"
+
+          # Copy headers
+          cp -r runtime "${STAGING}/include/"
+          find "${STAGING}/include/runtime" -name "*.cc" -delete
+          find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -type d -empty -delete
+
+          # Create tarball
+          tar czf "${STAGING}.tar.gz" "${STAGING}"
+          echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release.
+        run: gh release upload ${GITHUB_REF_NAME} ${STAGING}.tar.gz --clobber
+
+  build-macos-arm64:
+    name: "Build macOS ARM64"
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout code.
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up cache keys.
+        id: cache-keys
+        run: |
+          CACHE_RESTORE_KEY_2="release-mac-arm64"
+          CACHE_RESTORE_KEY_1="$CACHE_RESTORE_KEY_2-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}"
+          CACHE_RESTORE_KEY_0="$CACHE_RESTORE_KEY_1-${{ hashFiles('**/BUILD*') }}"
+          CACHE_KEY="$CACHE_RESTORE_KEY_0-${{ github.sha }}"
+          echo "CACHE_RESTORE_KEY_2=$CACHE_RESTORE_KEY_2" >> "$GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_1=$CACHE_RESTORE_KEY_1" >> "$GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_0=$CACHE_RESTORE_KEY_0" >> "$GITHUB_OUTPUT"
+          echo "CACHE_KEY=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Restore bazel cache.
+        id: bazel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/bazel-macos-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
+          restore-keys: |
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_0 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_1 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_2 }}-
+
+      - name: Run bazel build with dynamic linking.
+        run: |
+          bazel build --disk_cache=~/.cache/bazel-macos-release \
+            --define=litert_link_capi_so=true \
+            --define=resolve_symbols_in_exec=false \
+            //runtime/engine:litert_lm_main
+
+      - name: Package release archive.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGING="litert-lm-${VERSION}-macos-arm64"
+          mkdir -p "${STAGING}/bin" "${STAGING}/lib" "${STAGING}/include"
+
+          # Copy executable
+          cp bazel-bin/runtime/engine/litert_lm_main "${STAGING}/bin/"
+
+          # Copy prebuilt shared libraries
+          cp prebuilt/macos_arm64/libLiteRt.dylib "${STAGING}/lib/"
+          cp prebuilt/macos_arm64/libLiteRtWebGpuAccelerator.dylib "${STAGING}/lib/"
+          cp prebuilt/macos_arm64/libLiteRtTopKWebGpuSampler.dylib "${STAGING}/lib/"
+          cp prebuilt/macos_arm64/libGemmaModelConstraintProvider.dylib "${STAGING}/lib/"
+          cp prebuilt/macos_arm64/libLiteRtMetalAccelerator.dylib "${STAGING}/lib/"
+
+          # Copy headers
+          cp -r runtime "${STAGING}/include/"
+          find "${STAGING}/include/runtime" -name "*.cc" -delete
+          find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -type d -empty -delete
+
+          # Create tarball
+          tar czf "${STAGING}.tar.gz" "${STAGING}"
+          echo "STAGING=${STAGING}" >> "$GITHUB_ENV"
+
+      - name: Upload to GitHub Release.
+        run: gh release upload ${GITHUB_REF_NAME} ${STAGING}.tar.gz --clobber
+
+      - name: Save bazel cache.
+        uses: actions/cache/save@v4
+        if: steps.bazel-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/bazel-macos-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
+
+  build-windows-x64:
+    name: "Build Windows x86_64"
+    runs-on: Windows_x64
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # Clear ANDROID_NDK_HOME as Windows_x64 has NDK where jobs don't have permission for
+      # androidndk rules to create symlinks.
+      ANDROID_NDK_HOME:
+    steps:
+      - name: Checkout code.
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up cache keys and bazel output base.
+        id: cache-keys
+        run: |
+          $CACHE_RESTORE_KEY_2="release-win-x64"
+          $CACHE_RESTORE_KEY_1="$CACHE_RESTORE_KEY_2-${{ hashFiles('**/WORKSPACE', '**/.bazelrc') }}"
+          $CACHE_RESTORE_KEY_0="$CACHE_RESTORE_KEY_1-${{ hashFiles('**/BUILD*') }}"
+          $CACHE_KEY="$CACHE_RESTORE_KEY_0-${{ github.sha }}"
+          echo "CACHE_RESTORE_KEY_2=$CACHE_RESTORE_KEY_2" >> "$env:GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_1=$CACHE_RESTORE_KEY_1" >> "$env:GITHUB_OUTPUT"
+          echo "CACHE_RESTORE_KEY_0=$CACHE_RESTORE_KEY_0" >> "$env:GITHUB_OUTPUT"
+          echo "CACHE_KEY=$CACHE_KEY" >> "$env:GITHUB_OUTPUT"
+          # D: is faster than C: for I/O.
+          $SHORT_SHA=$("${{ github.sha }}".SubString(0, 8))
+          echo "BAZEL_OUTPUT_BASE=D:/w-$SHORT_SHA" >> "$env:GITHUB_ENV"
+
+      - name: Restore bazel cache.
+        id: bazel-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/bazel-windows-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
+          restore-keys: |
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_0 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_1 }}-
+            ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_2 }}-
+
+      - name: Run bazel build with dynamic linking.
+        run: |
+          bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
+            build --disk_cache=~/.cache/bazel-windows-release `
+            --define=litert_link_capi_so=true `
+            --define=resolve_symbols_in_exec=false `
+            //runtime/engine:litert_lm_main
+
+      - name: Package release archive.
+        run: |
+          $VERSION = "${{ github.ref_name }}".Substring(1)
+          $STAGING = "litert-lm-$VERSION-windows-x86_64"
+          New-Item -ItemType Directory -Path "$STAGING/bin","$STAGING/lib","$STAGING/include" -Force
+
+          # Copy executable
+          Copy-Item bazel-bin/runtime/engine/litert_lm_main.exe "$STAGING/bin/"
+
+          # Copy prebuilt shared libraries
+          Copy-Item prebuilt/windows_x86_64/libLiteRt.dll "$STAGING/lib/"
+          Copy-Item prebuilt/windows_x86_64/libLiteRtWebGpuAccelerator.dll "$STAGING/lib/"
+          Copy-Item prebuilt/windows_x86_64/libLiteRtTopKWebGpuSampler.dll "$STAGING/lib/"
+          Copy-Item prebuilt/windows_x86_64/libGemmaModelConstraintProvider.dll "$STAGING/lib/"
+          Copy-Item prebuilt/windows_x86_64/libGemmaModelConstraintProvider.lib "$STAGING/lib/"
+
+          # Copy headers
+          Copy-Item -Path "runtime" -Destination "$STAGING/include/runtime" -Recurse
+          Get-ChildItem "$STAGING/include/runtime" -Recurse -Include "*.cc","BUILD*" | Remove-Item -Force
+
+          # Create zip archive
+          Compress-Archive -Path "$STAGING/*" -DestinationPath "$STAGING.zip"
+          echo "STAGING=$STAGING" >> "$env:GITHUB_ENV"
+
+      - name: Upload to GitHub Release.
+        run: gh release upload ${{ github.ref_name }} $env:STAGING.zip --clobber
+
+      - name: Save bazel cache.
+        uses: actions/cache/save@v4
+        if: steps.bazel-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.cache/bazel-windows-release
+          key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
