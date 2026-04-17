@@ -93,6 +93,7 @@ jobs:
           cp -r runtime "${STAGING}/include/"
           find "${STAGING}/include/runtime" -name "*.cc" -delete
           find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -name "testdata" -type d -exec rm -rf {} +
           find "${STAGING}/include/runtime" -type d -empty -delete
 
           # Create tarball
@@ -141,6 +142,7 @@ jobs:
           cp -r runtime "${STAGING}/include/"
           find "${STAGING}/include/runtime" -name "*.cc" -delete
           find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -name "testdata" -type d -exec rm -rf {} +
           find "${STAGING}/include/runtime" -type d -empty -delete
 
           # Create tarball
@@ -212,6 +214,7 @@ jobs:
           cp -r runtime "${STAGING}/include/"
           find "${STAGING}/include/runtime" -name "*.cc" -delete
           find "${STAGING}/include/runtime" -name "BUILD*" -delete
+          find "${STAGING}/include/runtime" -name "testdata" -type d -exec rm -rf {} +
           find "${STAGING}/include/runtime" -type d -empty -delete
 
           # Create tarball
@@ -303,6 +306,7 @@ jobs:
           # Copy headers
           Copy-Item -Path "runtime" -Destination "$STAGING/include/runtime" -Recurse
           Get-ChildItem "$STAGING/include/runtime" -Recurse -Include "*.cc","BUILD*" | Remove-Item -Force
+          Get-ChildItem "$STAGING/include/runtime" -Recurse -Directory -Filter "testdata" | Remove-Item -Recurse -Force
 
           # Create zip archive
           Compress-Archive -Path "$STAGING/*" -DestinationPath "$STAGING.zip"
