@@ -309,7 +309,7 @@ jobs:
           echo "STAGING=$STAGING" >> "$env:GITHUB_ENV"
 
       - name: Upload to GitHub Release.
-        run: gh release upload ${{ github.ref_name }} $env:STAGING.zip --clobber
+        run: gh release upload ${{ github.ref_name }} "$($env:STAGING).zip" --clobber
 
       - name: Save bazel cache.
         uses: actions/cache/save@v4
