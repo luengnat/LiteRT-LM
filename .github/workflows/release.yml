@@ -233,6 +233,9 @@ jobs:
         shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
+      # Clear ANDROID_NDK_HOME to prevent Bazel from finding the pre-installed
+      # NDK on GitHub-hosted Windows runners, which causes symlink permission errors.
+      ANDROID_NDK_HOME:
     steps:
       - name: Checkout code.
         uses: actions/checkout@v4
