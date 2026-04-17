@@ -31,7 +31,7 @@ jobs:
   build-linux-x64:
     needs: create-release
     name: "Build Linux x86_64"
-    runs-on: LiteRT_Linux_x64
+    runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -108,19 +108,21 @@ jobs:
   build-linux-arm64:
     needs: create-release
     name: "Build Linux ARM64"
-    runs-on: ubuntu-22.04_ARM64-8core
+    runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Install dependencies.
-        run: sudo apt-get update && sudo apt-get install -y git-lfs
-
       - name: Checkout code.
         uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Run bazel build with dynamic linking.
+      - name: Install cross-compilation toolchain.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Run bazel build with dynamic linking (cross-compile).
         run: |
           bazel build \
             --config=linux_arm64 \
@@ -237,22 +239,19 @@ jobs:
   build-windows-x64:
     needs: create-release
     name: "Build Windows x86_64"
-    runs-on: Windows_x64
+    runs-on: windows-latest
     defaults:
       run:
         shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
-      # Clear ANDROID_NDK_HOME as Windows_x64 has NDK where jobs don't have permission for
-      # androidndk rules to create symlinks.
-      ANDROID_NDK_HOME:
     steps:
       - name: Checkout code.
         uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Set up cache keys and bazel output base.
+      - name: Set up cache keys.
         id: cache-keys
         run: |
           $CACHE_RESTORE_KEY_2="release-win-x64"
@@ -263,16 +262,12 @@ jobs:
           echo "CACHE_RESTORE_KEY_1=$CACHE_RESTORE_KEY_1" >> "$env:GITHUB_OUTPUT"
           echo "CACHE_RESTORE_KEY_0=$CACHE_RESTORE_KEY_0" >> "$env:GITHUB_OUTPUT"
           echo "CACHE_KEY=$CACHE_KEY" >> "$env:GITHUB_OUTPUT"
-          # D: is faster than C: for I/O.
-          $SHORT_SHA=$("${{ github.sha }}".SubString(0, 8))
-          echo "BAZEL_OUTPUT_BASE=D:/w-$SHORT_SHA" >> "$env:GITHUB_ENV"
 
       - name: Restore bazel cache.
         id: bazel-cache
         uses: actions/cache/restore@v4
         with:
-          path: |
-            ~/.cache/bazel-windows-release
+          path: ~/.cache/bazel-windows-release
           key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
           restore-keys: |
             ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_0 }}-
@@ -281,8 +276,7 @@ jobs:
 
       - name: Run bazel build with dynamic linking.
         run: |
-          bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
-            build --disk_cache=~/.cache/bazel-windows-release `
+          bazel build --disk_cache=~/.cache/bazel-windows-release `
             --define=litert_link_capi_so=true `
             --define=resolve_symbols_in_exec=false `
             //runtime/engine:litert_lm_main
