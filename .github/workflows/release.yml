@@ -241,12 +241,16 @@ jobs:
       # NDK on GitHub-hosted Windows runners, which causes symlink permission errors.
       ANDROID_NDK_HOME:
     steps:
+      - name: Enable Windows long paths.
+        run: |
+          reg add HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled /t REG_DWORD /d 1 /f
+
       - name: Checkout code.
         uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Set up cache keys.
+      - name: Set up cache keys and bazel output base.
         id: cache-keys
         run: |
           $CACHE_RESTORE_KEY_2="release-win-x64"
@@ -257,6 +261,9 @@ jobs:
           echo "CACHE_RESTORE_KEY_1=$CACHE_RESTORE_KEY_1" >> "$env:GITHUB_OUTPUT"
           echo "CACHE_RESTORE_KEY_0=$CACHE_RESTORE_KEY_0" >> "$env:GITHUB_OUTPUT"
           echo "CACHE_KEY=$CACHE_KEY" >> "$env:GITHUB_OUTPUT"
+          # Use short output base to avoid Windows path length issues.
+          $SHORT_SHA=$("${{ github.sha }}".SubString(0, 8))
+          echo "BAZEL_OUTPUT_BASE=C:/b-$SHORT_SHA" >> "$env:GITHUB_ENV"
 
       - name: Restore bazel cache.
         id: bazel-cache
@@ -271,7 +278,8 @@ jobs:
 
       - name: Run bazel build with dynamic linking.
         run: |
-          bazel build --disk_cache=~/.cache/bazel-windows-release `
+          bazel --output_base="$env:BAZEL_OUTPUT_BASE" `
+            build --disk_cache=~/.cache/bazel-windows-release `
             --define=litert_link_capi_so=true `
             --define=resolve_symbols_in_exec=false `
             //runtime/engine:litert_lm_main
