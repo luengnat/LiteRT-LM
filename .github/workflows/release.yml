@@ -64,10 +64,14 @@ jobs:
             ${{ steps.cache-keys.outputs.CACHE_RESTORE_KEY_2 }}-
 
       - name: Run bazel build with dynamic linking.
+        # Building with --define=xnn_enable_avxvnniint8=false because the Clang
+        # version on Ubuntu 22.04 does not support -mavxvnniint8. Ubuntu 22.04
+        # is used to maintain compatibility with older Linux distributions.
         run: |
           bazel build --disk_cache=~/.cache/bazel-linux-release --config=linux_x86_64 \
             --define=litert_link_capi_so=true \
             --define=resolve_symbols_in_exec=false \
+            --define=xnn_enable_avxvnniint8=false \
             //runtime/engine:litert_lm_main
 
       - name: Package release archive.
