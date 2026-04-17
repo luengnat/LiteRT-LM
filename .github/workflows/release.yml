@@ -105,39 +105,27 @@ jobs:
           path: ~/.cache/bazel-linux-release
           key: ${{ steps.cache-keys.outputs.CACHE_KEY }}
 
-  build-linux-arm64:
+  package-linux-arm64:
     needs: create-release
-    name: "Build Linux ARM64"
+    name: "Package Linux ARM64"
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      # NOTE: ARM64 shared libraries are taken from prebuilt/linux_arm64/.
+      # Cross-compilation with Bazel requires a dedicated ARM64 toolchain not
+      # available on stock GitHub-hosted runners. The x86_64 build validates
+      # the code compiles; prebuilt ARM64 libs are already tested upstream.
       - name: Checkout code.
         uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Install cross-compilation toolchain.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-      - name: Run bazel build with dynamic linking (cross-compile).
-        run: |
-          bazel build \
-            --config=linux_arm64 \
-            --define=litert_link_capi_so=true \
-            --define=resolve_symbols_in_exec=false \
-            //runtime/engine:litert_lm_main
-
       - name: Package release archive.
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           STAGING="litert-lm-${VERSION}-linux-arm64"
-          mkdir -p "${STAGING}/bin" "${STAGING}/lib" "${STAGING}/include"
-
-          # Copy executable
-          cp bazel-bin/runtime/engine/litert_lm_main "${STAGING}/bin/"
+          mkdir -p "${STAGING}/lib" "${STAGING}/include"
 
           # Copy prebuilt shared libraries
           cp prebuilt/linux_arm64/libLiteRt.so "${STAGING}/lib/"
