@@ -409,6 +409,11 @@ absl::StatusOr<Message> Conversation::SendMessage(const Message& message,
     return status;
   }
 
+  // Trigger tasks to run in the execution manager. Necessary for the serial
+  // executor, which lazily runs tasks only when they're waited on.
+  // This should not slow down the threaded execution manager since it will
+  // need to wait for all the session's tasks to complete anyway.
+  RETURN_IF_ERROR(session_->WaitUntilDone());
   done.WaitForNotification();
 
   if (!error_status.ok()) {
@@ -547,6 +552,9 @@ absl::Status Conversation::SendMessageAsync(
                 // If prefill failed, invoke the callback with the error
                 // status and do not proceed to decode.
                 (*callback)(responses.status());
+              } else if (responses.ok() &&
+                         responses->GetTaskState() == TaskState::kCancelled) {
+                (*callback)(responses);
               } else if (IsEmptyInputError(responses.status()) ||
                          responses->GetTaskState() == TaskState::kDone) {
                 // Scenario 2: Prefill was skipped due to empty input, or
@@ -690,6 +698,11 @@ absl::StatusOr<std::unique_ptr<Conversation>> Conversation::Clone() {
     new_conversation->history_ = history_;
   }
   return new_conversation;
+}
+
+absl::StatusOr<std::string> Conversation::RenderMessageIntoString(
+    const Message& message, OptionalArgs optional_args) {
+  return GetSingleTurnText(message, optional_args);
 }
 
 absl::StatusOr<std::string> Conversation::GetPrefillTextForMessages(

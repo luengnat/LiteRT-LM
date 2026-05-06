@@ -35,7 +35,6 @@
 #include <vector>
 
 #include "absl/functional/any_invocable.h"  // from @com_google_absl
-#include "absl/log/absl_check.h"  // from @com_google_absl
 #include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/log/log_sink_registry.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
@@ -219,9 +218,8 @@ absl::StatusOr<Message> RunSingleTurnConversation(
   bool should_print_output = settings.benchmark_prefill_tokens == 0;
   if (settings.async) {
     auto print_message_callback =
-        should_print_output
-            ? CreatePrintMessageCallback(captured_output)
-            : [](absl::StatusOr<Message> message) {};
+        should_print_output ? CreatePrintMessageCallback(captured_output)
+                            : [](absl::StatusOr<Message> message) {};
     RETURN_IF_ERROR(conversation->SendMessageAsync(
         json::object({{"role", "user"}, {"content", content_list}}),
         std::move(print_message_callback), std::move(optional_args)));
@@ -253,17 +251,16 @@ absl::Status RunMultiTurnConversation(const LiteRtLmSettings& settings,
     if (input_prompt.empty()) {
       break;
     }
-    json content_list = json::array();
-
     // If there is an error building the content list, skip the prompt and
     // continue.
     std::vector<InputData> input_data;
     input_data.push_back(InputText(input_prompt));
-    auto status = BuildContentList(input_data, settings, content_list);
-    if (!status.ok()) {
-      std::cout << status.message() << std::endl;
+    auto content_list_or = BuildContentList(input_data, settings);
+    if (!content_list_or.ok()) {
+      std::cout << content_list_or.status().message() << std::endl;
       continue;
     }
+    const json& content_list = *content_list_or;
     if (content_list.empty()) {
       continue;
     }
@@ -529,6 +526,20 @@ absl::StatusOr<EngineSettings> CreateEngineSettings(
     gpu_artisan_settings.use_submodel = settings.use_submodel;
     executor_settings.SetBackendConfig(gpu_artisan_settings);
   }
+  if (backend == Backend::NPU) {
+    auto& executor_settings = engine_settings.GetMutableMainExecutorSettings();
+    ASSIGN_OR_RETURN(
+        auto npu_settings,
+        executor_settings.MutableBackendConfig<litert::lm::NpuConfig>());
+    npu_settings.enable_neon_for_npu_greedy_sampling =
+        settings.enable_neon_for_npu_greedy_sampling;
+    npu_settings.use_hw_masking_for_npu = settings.use_hw_masking_for_npu;
+    npu_settings.use_hw_cache_update_for_npu =
+        settings.use_hw_cache_update_for_npu;
+    npu_settings.use_hw_ple_for_npu = settings.use_hw_ple_for_npu;
+    npu_settings.enable_npu_debug_logging = settings.enable_npu_debug_logging;
+    executor_settings.SetBackendConfig(npu_settings);
+  }
   const std::optional<Backend> sampler_backend = GetSamplerBackend(settings);
   if (sampler_backend.has_value()) {
     engine_settings.GetMutableMainExecutorSettings().SetSamplerBackend(
@@ -604,7 +615,7 @@ absl::StatusOr<std::unique_ptr<litert::lm::Engine>> CreateEngine(
     const LiteRtLmSettings& settings, const EngineSettings& engine_settings) {
   ABSL_LOG(INFO) << "Creating engine";
   ASSIGN_OR_RETURN(auto engine,
-                   litert::lm::EngineFactory::CreateAny(
+                   litert::lm::EngineFactory::CreateDefault(
                        std::move(engine_settings), settings.input_prompt));
   if (settings.vision_backend.has_value()) {
     ASSIGN_OR_RETURN(auto vision_executor_properties,
@@ -639,9 +650,10 @@ SessionConfig CreateSessionConfig(const LiteRtLmSettings& settings) {
 }
 
 // TODO(b/453071109): Check if returning the content list is more appropriate.
-absl::Status BuildContentList(const std::vector<InputData>& input_data,
-                              const LiteRtLmSettings& settings,
-                              nlohmann::json& content_list) {
+absl::StatusOr<nlohmann::json> BuildContentList(
+    const std::vector<InputData>& input_data,
+    const LiteRtLmSettings& settings) {
+  nlohmann::json content_list = nlohmann::json::array();
   // We expect the media path to be in the format of [image:/path/to/image.jpg]
   // or [audio:/path/to/audio.wav]
   //
@@ -706,11 +718,14 @@ absl::Status BuildContentList(const std::vector<InputData>& input_data,
       ASSIGN_OR_RETURN(auto raw_bytes, image->GetRawImageBytes());
       content_list.push_back(
           {{"type", "image"}, {"blob", absl::Base64Escape(raw_bytes)}});
+    } else if (const auto* audio = std::get_if<InputAudio>(&data)) {
+      ASSIGN_OR_RETURN(auto raw_bytes, audio->GetRawAudioBytes());
+      content_list.push_back(
+          {{"type", "audio"}, {"blob", absl::Base64Escape(raw_bytes)}});
     }
-    // TODO(b/453071109): Add support for audio.
   }
 
-  return absl::OkStatus();
+  return content_list;
 }
 
 absl::Status RunLiteRtLm(const LiteRtLmSettings& settings,
@@ -776,10 +791,10 @@ absl::Status RunLiteRtLm(const LiteRtLmSettings& settings,
                                                  conversation.get()));
       } else {
         ABSL_LOG(INFO) << "Running single-turn conversation";
-        json content_list = json::array();
         std::vector<InputData> input_data;
         input_data.push_back(InputText(settings.input_prompt));
-        RETURN_IF_ERROR(BuildContentList(input_data, settings, content_list));
+        ASSIGN_OR_RETURN(auto content_list,
+                         BuildContentList(input_data, settings));
         RETURN_IF_ERROR(RunSingleTurnConversation(content_list, settings,
                                                   engine.get(),
                                                   conversation.get())

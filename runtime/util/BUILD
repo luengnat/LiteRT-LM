@@ -292,9 +292,15 @@ cc_test(
 
 cc_library(
     name = "logging",
+    srcs = ["logging.cc"],
     hdrs = ["logging.h"],
     deps = [
+        "@com_google_absl//absl/base:log_severity",
+        "@com_google_absl//absl/base:no_destructor",
+        "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/strings",
+        "@litert//litert/c/internal:litert_logging",
+        "@litert//tflite:minimal_logging",
     ],
 )
 
@@ -344,6 +350,7 @@ cc_library(
         "@com_google_absl//absl/types:span",
         "@litert//litert/cc:litert_macros",
         "@litert//litert/cc:litert_ranked_tensor_type",
+        "@litert//litert/cc:litert_tensor_buffer_types",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
@@ -661,6 +668,8 @@ cc_library(
     srcs = ["model_type_utils.cc"],
     hdrs = ["model_type_utils.h"],
     deps = [
+        ":litert_status_util",
+        "@com_google_absl//absl/hash",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -668,7 +677,6 @@ cc_library(
         "//runtime/proto:llm_metadata_cc_proto",
         "//runtime/proto:llm_model_type_cc_proto",
         "//runtime/proto:token_cc_proto",
-        "//runtime/util:litert_status_util",
     ],
 )
 

@@ -31,6 +31,7 @@
 #include "absl/time/time.h"  // from @com_google_absl
 #include "nlohmann/json_fwd.hpp"  // from @nlohmann_json
 #include "litert/c/internal/litert_logging.h"  // from @litert
+#include "runtime/components/prompt_template.h"
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/io_types.h"
 #include "runtime/engine/engine.h"
@@ -40,6 +41,9 @@
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/llm_executor_settings.h"
 #include "runtime/proto/sampler_params.pb.h"
+#include "runtime/util/file_util.h"
+#include "runtime/util/logging.h"
+#include "schema/capabilities/capabilities_c.h"
 #include "tflite/logger.h"  // from @litert
 #include "tflite/minimal_logging.h"  // from @litert
 
@@ -60,20 +64,22 @@
 
 namespace {
 using litert::lm::Backend;
+using litert::lm::Channel;
 using litert::lm::Conversation;
 using litert::lm::ConversationConfig;
 using litert::lm::Engine;
 using litert::lm::EngineFactory;
 using litert::lm::EngineSettings;
+using litert::lm::FileExists;
 using litert::lm::InputAudio;
 using litert::lm::InputData;
 using litert::lm::InputImage;
 using litert::lm::InputText;
-
 using litert::lm::JsonPreface;
 using litert::lm::Message;
 using litert::lm::ModelAssets;
 using litert::lm::Preface;
+using litert::lm::PromptTemplate;
 using litert::lm::Responses;
 using litert::lm::SessionConfig;
 using litert::lm::proto::SamplerParameters;
@@ -333,57 +339,8 @@ Java_com_google_ai_edge_litertlm_NativeLibraryLoader_nativeCheckLoaded(
 
 LITERTLM_JNIEXPORT void JNICALL JNI_METHOD(nativeSetMinLogSeverity)(
     JNIEnv* env, jclass thiz, jint log_severity) {
-  absl::LogSeverityAtLeast absl_log_severity;
-  LiteRtLogSeverity litert_log_severity;
-  tflite::LogSeverity tflite_log_severity;
-
-  switch (log_severity) {
-    case 0:  // verbose
-      absl_log_severity = absl::LogSeverityAtLeast::kInfo;
-      litert_log_severity = kLiteRtLogSeverityVerbose;
-      tflite_log_severity = tflite::TFLITE_LOG_VERBOSE;
-      break;
-    case 1:  // debug
-      absl_log_severity = absl::LogSeverityAtLeast::kInfo;
-      litert_log_severity = kLiteRtLogSeverityDebug;
-      tflite_log_severity = tflite::TFLITE_LOG_VERBOSE;
-      break;
-    case 2:  // info
-      absl_log_severity = absl::LogSeverityAtLeast::kInfo;
-      litert_log_severity = kLiteRtLogSeverityInfo;
-      tflite_log_severity = tflite::TFLITE_LOG_INFO;
-      break;
-    case 3:  // warning
-      absl_log_severity = absl::LogSeverityAtLeast::kWarning;
-      litert_log_severity = kLiteRtLogSeverityWarning;
-      tflite_log_severity = tflite::TFLITE_LOG_WARNING;
-      break;
-    case 4:  // error
-      absl_log_severity = absl::LogSeverityAtLeast::kError;
-      litert_log_severity = kLiteRtLogSeverityError;
-      tflite_log_severity = tflite::TFLITE_LOG_ERROR;
-      break;
-    case 5:  // fatal
-      absl_log_severity = absl::LogSeverityAtLeast::kFatal;
-      litert_log_severity = kLiteRtLogSeverityError;
-      tflite_log_severity = tflite::TFLITE_LOG_ERROR;
-      break;
-    default:  // infinity
-      absl_log_severity = absl::LogSeverityAtLeast::kInfinity;
-      litert_log_severity = kLiteRtLogSeveritySilent;
-      tflite_log_severity = tflite::TFLITE_LOG_SILENT;
-      break;
-  }
-
-  // Update the absl logging framework, used by LiteRT-LM.
-  absl::SetMinLogLevel(absl_log_severity);
-
-  // Update the logging framework of LiteRT.
-  LiteRtSetMinLoggerSeverity(LiteRtGetDefaultLogger(), litert_log_severity);
-
-  // Update the logging framework of TFLite.
-  tflite::logging_internal::MinimalLogger::SetMinimumLogSeverity(
-      tflite_log_severity);
+  litert::lm::SetMinLogSeverity(
+      static_cast<litert::lm::LogSeverity>(log_severity));
 }
 
 LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateEngine)(
@@ -397,9 +354,7 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateEngine)(
   std::string model_path_str(model_path_chars);
   env->ReleaseStringUTFChars(model_path, model_path_chars);
 
-  // Check if the file exists.
-  struct stat buffer;
-  if (stat(model_path_str.c_str(), &buffer) != 0) {
+  if (!FileExists(model_path_str)) {
     ThrowLiteRtLmJniException(env, "Model file not found: " + model_path_str);
     return 0;
   }
@@ -554,7 +509,7 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateEngine)(
         advanced_settings);
   }
 
-  auto engine = EngineFactory::CreateAny(*settings);
+  auto engine = EngineFactory::CreateDefault(*settings);
   if (!engine.ok()) {
     ThrowLiteRtLmJniException(
         env, "Failed to create engine: " + engine.status().ToString());
@@ -572,9 +527,7 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateBenchmark)(
   std::string model_path_str(model_path_chars);
   env->ReleaseStringUTFChars(model_path, model_path_chars);
 
-  // Check if the file exists.
-  struct stat buffer;
-  if (stat(model_path_str.c_str(), &buffer) != 0) {
+  if (!FileExists(model_path_str)) {
     ThrowLiteRtLmJniException(env, "Model file not found: " + model_path_str);
     return 0;
   }
@@ -625,7 +578,7 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateBenchmark)(
   benchmark_params.set_num_prefill_tokens(prefill_tokens);
   benchmark_params.set_num_decode_tokens(decode_tokens);
 
-  auto engine = EngineFactory::CreateAny(*settings);
+  auto engine = EngineFactory::CreateDefault(*settings);
   if (!engine.ok()) {
     ThrowLiteRtLmJniException(
         env, "Failed to create engine: " + engine.status().ToString());
@@ -651,6 +604,13 @@ JNI_METHOD(nativeCreateSession)(JNIEnv* env, jclass thiz, jlong engine_pointer,
   }
 
   Engine* engine = reinterpret_cast<Engine*>(engine_pointer);
+  if (engine->GetEngineSettings().GetAudioExecutorSettings().has_value()) {
+    session_config.SetAudioModalityEnabled(true);
+  }
+  if (engine->GetEngineSettings().GetVisionExecutorSettings().has_value()) {
+    session_config.SetVisionModalityEnabled(true);
+  }
+
   auto session = engine->CreateSession(session_config);
   if (!session.ok()) {
     ThrowLiteRtLmJniException(
@@ -849,7 +809,9 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateConversation)(
     JNIEnv* env, jclass thiz, jlong engine_pointer, jobject sampler_config_obj,
     jstring messages_json_string, jstring tools_description_json_string,
     jstring channels_json_string, jstring extra_context_json_string,
-    jboolean enable_constrained_decoding) {
+    jboolean enable_constrained_decoding,
+    jboolean filter_channel_content_from_kv_cache,
+    jstring overwrite_prompt_template) {
   Engine* engine = reinterpret_cast<Engine*>(engine_pointer);
 
   // Create a native SessionConfig
@@ -857,6 +819,12 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateConversation)(
   if (sampler_config_obj != nullptr) {
     session_config.GetMutableSamplerParams() =
         CreateSamplerParamsFromJni(env, sampler_config_obj);
+  }
+  if (engine->GetEngineSettings().GetAudioExecutorSettings().has_value()) {
+    session_config.SetAudioModalityEnabled(true);
+  }
+  if (engine->GetEngineSettings().GetVisionExecutorSettings().has_value()) {
+    session_config.SetVisionModalityEnabled(true);
   }
 
   // Create the Preface from the system instruction and tools.
@@ -895,7 +863,9 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateConversation)(
       ConversationConfig::Builder()
           .SetSessionConfig(session_config)
           .SetPreface(json_preface)
-          .SetEnableConstrainedDecoding(enable_constrained_decoding);
+          .SetEnableConstrainedDecoding(enable_constrained_decoding)
+          .SetFilterChannelContentFromKvCache(
+              filter_channel_content_from_kv_cache);
 
   // Set the channels, if provided.
   // If channels is nullptr, the Conversation will use the channels defined in
@@ -917,6 +887,19 @@ LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateConversation)(
       }
     }
     conversation_config_builder.SetChannels(channels);
+  }
+
+  // Set the overwrite prompt template, if provided.
+  if (overwrite_prompt_template != nullptr) {
+    const char* overwrite_prompt_template_chars =
+        env->GetStringUTFChars(overwrite_prompt_template, nullptr);
+    std::string overwrite_prompt_template_str(overwrite_prompt_template_chars);
+    env->ReleaseStringUTFChars(overwrite_prompt_template,
+                               overwrite_prompt_template_chars);
+    if (!overwrite_prompt_template_str.empty()) {
+      conversation_config_builder.SetOverwritePromptTemplate(
+          litert::lm::PromptTemplate(overwrite_prompt_template_str));
+    }
   }
 
   // Build the conversation
@@ -1079,6 +1062,66 @@ LITERTLM_JNIEXPORT void JNICALL JNI_METHOD(nativeConversationCancelProcess)(
   Conversation* conversation =
       reinterpret_cast<Conversation*>(conversation_pointer);
   conversation->CancelProcess();
+}
+
+LITERTLM_JNIEXPORT jstring JNICALL JNI_METHOD(
+    nativeConversationRenderMessageIntoString)(JNIEnv* env, jclass thiz,
+                                               jlong conversation_pointer,
+                                               jstring messageJSONString,
+                                               jstring extraContextJsonString) {
+  Conversation* conversation =
+      reinterpret_cast<Conversation*>(conversation_pointer);
+
+  const char* json_chars = env->GetStringUTFChars(messageJSONString, nullptr);
+  litert::lm::Message json_message = nlohmann::ordered_json::parse(json_chars);
+  env->ReleaseStringUTFChars(messageJSONString, json_chars);
+
+  litert::lm::OptionalArgs optional_args;
+  nlohmann::ordered_json extra_context =
+      GetExtraContextJson(env, extraContextJsonString);
+  if (!extra_context.is_null() && !extra_context.empty()) {
+    optional_args.extra_context = extra_context;
+  }
+
+  auto response = conversation->RenderMessageIntoString(
+      json_message, std::move(optional_args));
+  if (!response.ok()) {
+    ThrowLiteRtLmJniException(
+        env, "Failed to call nativeConversationRenderMessageIntoString: " +
+                 response.status().ToString());
+    return nullptr;
+  }
+
+  return NewStringStandardUTF(env, *response);
+}
+
+LITERTLM_JNIEXPORT jlong JNICALL JNI_METHOD(nativeCreateCapabilities)(
+    JNIEnv* env, jclass thiz, jstring model_path) {
+  const char* model_path_chars = env->GetStringUTFChars(model_path, nullptr);
+  std::string model_path_str(model_path_chars);
+  env->ReleaseStringUTFChars(model_path, model_path_chars);
+
+  auto loaded_file = litert_lm_loaded_file_create(model_path_str.c_str());
+  if (loaded_file == nullptr) {
+    ThrowLiteRtLmJniException(
+        env, "Failed to open LiteRT-LM file: " + model_path_str);
+    return 0;
+  }
+
+  return reinterpret_cast<jlong>(loaded_file);
+}
+
+LITERTLM_JNIEXPORT void JNICALL JNI_METHOD(nativeDeleteCapabilities)(
+    JNIEnv* env, jclass thiz, jlong capabilities_pointer) {
+  litert_lm_loaded_file_delete(
+      reinterpret_cast<LiteRtLmLoadedFile*>(capabilities_pointer));
+}
+
+LITERTLM_JNIEXPORT jboolean JNICALL
+JNI_METHOD(nativeHasSpeculativeDecodingSupport)(JNIEnv* env, jclass thiz,
+                                                jlong capabilities_pointer) {
+  return litert_lm_loaded_file_has_speculative_decoding_support(
+      reinterpret_cast<LiteRtLmLoadedFile*>(capabilities_pointer));
 }
 
 }  // extern "C"

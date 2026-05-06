@@ -32,10 +32,11 @@
 #include "absl/time/clock.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
 #include "litert/cc/litert_environment.h"  // from @litert
+#include "litert/cc/litert_environment_options.h"  // from @litert
 #include "litert/cc/litert_macros.h"  // from @litert
 #include "runtime/components/model_resources.h"
 #include "runtime/components/tokenizer.h"
-#include "runtime/core/session_factory.h"
+#include "runtime/core/session_basic.h"
 #include "runtime/engine/engine.h"
 #include "runtime/engine/engine_factory.h"
 #include "runtime/engine/engine_settings.h"
@@ -54,6 +55,7 @@
 #include "runtime/framework/threadpool.h"
 #include "runtime/proto/llm_metadata.pb.h"
 #include "runtime/proto/sampler_params.pb.h"
+#include "runtime/util/logging.h"
 #include "runtime/util/status_macros.h"  // NOLINT
 
 namespace litert::lm {
@@ -70,7 +72,12 @@ absl::StatusOr<Environment&> GetEnvironment(EngineSettings& engine_settings,
   static absl::NoDestructor<MagicNumberConfigsHelper> helper;
   static absl::NoDestructor<absl::StatusOr<Environment>> kEnvironment(
       [&]() -> absl::StatusOr<Environment> {
-        std::vector<Environment::Option> env_options;
+        std::vector<EnvironmentOptions::Option> env_options;
+        if (auto severity = GetMinLogSeverity()) {
+          env_options.push_back(::litert::EnvironmentOptions::Option{
+              ::litert::EnvironmentOptions::Tag::kMinLoggerSeverity,
+              ToLiteRtLogSeverityInt8(*severity)});
+        }
         const auto& main_executor_settings =
             engine_settings.GetMainExecutorSettings();
 
@@ -90,8 +97,8 @@ absl::StatusOr<Environment&> GetEnvironment(EngineSettings& engine_settings,
 #else
           if (!main_executor_settings.GetLitertDispatchLibDir().empty()) {
             // If the dispatch library directory is provided, use it.
-            env_options.push_back(::litert::Environment::Option{
-                ::litert::Environment::OptionTag::DispatchLibraryDir,
+            env_options.push_back(::litert::EnvironmentOptions::Option{
+                ::litert::EnvironmentOptions::Tag::kDispatchLibraryDir,
                 main_executor_settings.GetLitertDispatchLibDir()});
             ABSL_LOG(INFO) << "Setting dispatch library path from "
                               "main_executor_settings: "
@@ -108,8 +115,8 @@ absl::StatusOr<Environment&> GetEnvironment(EngineSettings& engine_settings,
             if (!kDispatchLibraryPath->empty()) {
               ABSL_LOG(INFO)
                   << "Setting dispatch library path: " << *kDispatchLibraryPath;
-              env_options.push_back(::litert::Environment::Option{
-                  ::litert::Environment::OptionTag::DispatchLibraryDir,
+              env_options.push_back(::litert::EnvironmentOptions::Option{
+                  ::litert::EnvironmentOptions::Tag::kDispatchLibraryDir,
                   absl::string_view(*kDispatchLibraryPath)});
             } else {
               ABSL_LOG(INFO) << "No dispatch library path provided.";
@@ -117,7 +124,8 @@ absl::StatusOr<Environment&> GetEnvironment(EngineSettings& engine_settings,
           }
 #endif  // defined(LITERT_DISABLE_NPU)
         }
-        LITERT_ASSIGN_OR_RETURN(auto env, Environment::Create(env_options));
+        LITERT_ASSIGN_OR_RETURN(
+            auto env, Environment::Create(EnvironmentOptions(env_options)));
         return std::move(env);
       }());
   if (!kEnvironment->ok()) {
@@ -179,11 +187,11 @@ class EngineImpl : public Engine {
     }
     ASSIGN_OR_RETURN(
         auto session,
-        InitializeSessionBasic(executor_.get(), tokenizer_.get(),
-                               /*vision_executor=*/vision_executor_.get(),
-                               /*audio_executor=*/audio_executor_.get(), config,
-                               std::move(session_benchmark_info),
-                               worker_thread_pool_.get()));
+        SessionBasic::Create(executor_.get(), tokenizer_.get(),
+                             /*vision_executor=*/vision_executor_.get(),
+                             /*audio_executor=*/audio_executor_.get(), config,
+                             std::move(session_benchmark_info),
+                             worker_thread_pool_.get()));
     if (benchmark_info_.has_value()) {
       auto session_benchmark_info_or = session->GetMutableBenchmarkInfo();
       if (session_benchmark_info_or.ok()) {
@@ -309,6 +317,12 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineImpl::Create(
         model_resources->GetTFLiteModelBackendConstraint(
             ModelType::kTfLiteVisionEncoder),
         model_resources->GetTFLiteModelBackendConstraint(
+            ModelType::kTfLiteAudioEncoderHw),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLitePrefillDecode),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLiteVisionEncoder),
+        model_resources->GetTFLiteModelPreferActivationType(
             ModelType::kTfLiteAudioEncoderHw)));
   } else {
     // If the model type is available, wait for the tokenizer to be created
@@ -329,6 +343,12 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineImpl::Create(
         model_resources->GetTFLiteModelBackendConstraint(
             ModelType::kTfLiteVisionEncoder),
         model_resources->GetTFLiteModelBackendConstraint(
+            ModelType::kTfLiteAudioEncoderHw),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLitePrefillDecode),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLiteVisionEncoder),
+        model_resources->GetTFLiteModelPreferActivationType(
             ModelType::kTfLiteAudioEncoderHw)));
   }
 
@@ -381,6 +401,12 @@ absl::StatusOr<std::unique_ptr<Engine>> EngineImpl::Create(
         model_resources->GetTFLiteModelBackendConstraint(
             ModelType::kTfLiteVisionEncoder),
         model_resources->GetTFLiteModelBackendConstraint(
+            ModelType::kTfLiteAudioEncoderHw),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLitePrefillDecode),
+        model_resources->GetTFLiteModelPreferActivationType(
+            ModelType::kTfLiteVisionEncoder),
+        model_resources->GetTFLiteModelPreferActivationType(
             ModelType::kTfLiteAudioEncoderHw)));
     // As we load the tokenizer asynchronously, we need to update the executor
     // settings after the tokenizer is loaded.
