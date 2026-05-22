@@ -1,6 +1,19 @@
+# Copyright 2026 The ODML Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import collections.abc
 import http.client
-import http.server
 import json
 import pathlib
 import threading
@@ -10,7 +23,8 @@ import urllib.request
 from absl.testing import absltest
 
 from litert_lm_cli import model
-from litert_lm_cli import serve
+from litert_lm_cli.commands import openai_handler
+from litert_lm_cli.commands import serve_util
 
 
 def _parse_sse_events(
@@ -33,10 +47,10 @@ class ServeOpenAIStreamingTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
-    self.enter_context(mock.patch.object(serve, "_current_engine", None))
-    self.enter_context(mock.patch.object(serve, "_current_model_id", None))
 
-    self.server = http.server.HTTPServer(("localhost", 0), serve.OpenAIHandler)
+    self.server = serve_util.LiteRTLMServer(
+        ("localhost", 0), openai_handler.OpenAIHandler
+    )
     self.port = self.server.server_port
 
     self.server_thread = threading.Thread(

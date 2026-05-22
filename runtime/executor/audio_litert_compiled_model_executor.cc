@@ -22,7 +22,6 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/base/nullability.h"  // from @com_google_absl
@@ -52,15 +51,17 @@
 #include "runtime/engine/io_types.h"
 #include "runtime/executor/audio_executor_settings.h"
 #include "runtime/executor/audio_executor_utils.h"
-#include "runtime/executor/common_utils.h"
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/litert_compiled_model_executor_utils.h"
 #include "runtime/executor/llm_executor_io_types.h"
 #include "runtime/util/convert_tensor_buffer.h"
 #include "runtime/util/file_util.h"
-#include "runtime/util/scoped_file.h"
 #include "runtime/util/tensor_buffer_util.h"
 #include "tflite/types/half.h"  // from @litert
+
+#if !defined(LITERT_DISABLE_NPU)
+#include "litert/cc/options/litert_google_tensor_options.h"  // from @litert
+#endif  // !defined(LITERT_DISABLE_NPU)
 
 namespace litert::lm {
 namespace {
@@ -68,7 +69,7 @@ namespace {
 // Set the default GPU options for the model.
 absl::Status SetGpuOptions(const AudioExecutorSettings& executor_settings,
                            litert::GpuOptions& gpu_options) {
-  #if defined(LITERT_USE_WEBGPU_ACCELERATOR)
+#if defined(LITERT_USE_WEBGPU_ACCELERATOR)
   gpu_options.SetBackend(GpuOptions::Backend::kWebGpu);
 #endif  // defined(LITERT_USE_WEBGPU_ACCELERATOR)
   gpu_options.EnableConstantTensorSharing(true);
@@ -99,6 +100,11 @@ absl::Status SetGpuOptions(const AudioExecutorSettings& executor_settings,
   gpu_options.SetConvertWeightsOnGpu(true);
   gpu_options.SetHintFullyDelegatedToSingleDelegate(true);
   gpu_options.EnableInfiniteFloatCapping(true);
+  gpu_options.SetNumStepsOfCommandBufferPreparations(2);
+  gpu_options.EnableExternalTensorsMode(false);
+  gpu_options.SetNumThreadsToUpload(2);
+  gpu_options.SetNumThreadsToCompile(1);
+  gpu_options.EnableAllowSrcQuantizedFcConvOps(false);
   return absl::OkStatus();
 }
 
@@ -191,7 +197,6 @@ AudioLiteRtCompiledModelExecutor::AudioStaticEncoder::Initialize() {
       absl::StrCat(AudioExecutorSettings::kStaticEncoderName,
                    ExecutorSettingsBase::kXnnpackCacheSuffix),
       /*check_and_clean=*/true);
-  std::string weight_cache_path = executor_settings_.GetCacheDir();
   if (executor_settings_.GetBackend() == Backend::GPU) {
     LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
     ASSIGN_OR_RETURN(auto model_path,
@@ -201,12 +206,19 @@ AudioLiteRtCompiledModelExecutor::AudioStaticEncoder::Initialize() {
         absl::StrCat(AudioExecutorSettings::kStaticEncoderName,
                      ExecutorSettingsBase::kMlDriftCacheSuffix),
         /*check_and_clean=*/true);
+    auto weight_cache_file = executor_settings_.GetWeightCacheFile(
+        absl::StrCat(AudioExecutorSettings::kStaticEncoderName,
+                     ExecutorSettingsBase::kMlDriftCacheSuffix),
+        /*check_and_clean=*/true);
     RETURN_IF_ERROR(SetGpuOptions(executor_settings_, gpu_options));
+    ASSIGN_OR_RETURN(std::string metadata_id,
+                     GetFileCacheIdentifier(model_path));
     RETURN_IF_ERROR(SetGpuCacheOptions(
-        weight_cache_path, program_cache_file, executor_settings_,
-        absl::StrCat(model_basename, AudioExecutorSettings::kStaticEncoderName),
+        weight_cache_file, program_cache_file,
+        absl::StrCat(model_basename, AudioExecutorSettings::kStaticEncoderName,
+                     "_", metadata_id),
         /*logging_prefix=*/AudioExecutorSettings::kStaticEncoderName,
-        gpu_options));
+        /*cache_compiled_shaders_only=*/false, gpu_options));
     options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
   } else if (executor_settings_.GetBackend() == Backend::CPU) {
     LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
@@ -215,6 +227,14 @@ AudioLiteRtCompiledModelExecutor::AudioStaticEncoder::Initialize() {
         weight_cache_file, AudioExecutorSettings::kEncoderName, cpu_options));
 
     options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#if !defined(LITERT_DISABLE_NPU)
+  } else if (executor_settings_.GetBackend() == Backend::NPU) {
+    LITERT_ASSIGN_OR_RETURN(auto& google_tensor_options,
+                            options.GetGoogleTensorOptions());
+    google_tensor_options.SetPerformanceMode(
+        google_tensor::GoogleTensorOptions::PerformanceMode::kBurst);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#endif  // !defined(LITERT_DISABLE_NPU)
   } else {
     return absl::InvalidArgumentError(
         absl::StrCat("Unsupported backend for AudioStaticEncoder: ",
@@ -323,7 +343,6 @@ AudioLiteRtCompiledModelExecutor::AudioStreamingEncoder::Initialize() {
       absl::StrCat(AudioExecutorSettings::kStreamingEncoderName,
                    ExecutorSettingsBase::kXnnpackCacheSuffix),
       /*check_and_clean=*/true);
-  std::string weight_cache_path = executor_settings_.GetCacheDir();
   if (executor_settings_.GetBackend() == Backend::GPU) {
     LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
     ASSIGN_OR_RETURN(auto model_path,
@@ -333,13 +352,20 @@ AudioLiteRtCompiledModelExecutor::AudioStreamingEncoder::Initialize() {
         absl::StrCat(AudioExecutorSettings::kStreamingEncoderName,
                      ExecutorSettingsBase::kMlDriftCacheSuffix),
         /*check_and_clean=*/true);
+    auto weight_cache_file = executor_settings_.GetWeightCacheFile(
+        absl::StrCat(AudioExecutorSettings::kStreamingEncoderName,
+                     ExecutorSettingsBase::kMlDriftCacheSuffix),
+        /*check_and_clean=*/true);
     RETURN_IF_ERROR(SetGpuOptions(executor_settings_, gpu_options));
+    ASSIGN_OR_RETURN(std::string metadata_id,
+                     GetFileCacheIdentifier(model_path));
     RETURN_IF_ERROR(SetGpuCacheOptions(
-        weight_cache_path, program_cache_file, executor_settings_,
+        weight_cache_file, program_cache_file,
         absl::StrCat(model_basename,
-                     AudioExecutorSettings::kStreamingEncoderName),
+                     AudioExecutorSettings::kStreamingEncoderName, "_",
+                     metadata_id),
         /*logging_prefix=*/AudioExecutorSettings::kStreamingEncoderName,
-        gpu_options));
+        /*cache_compiled_shaders_only=*/false, gpu_options));
     options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
   } else if (executor_settings_.GetBackend() == Backend::CPU) {
     LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
@@ -349,6 +375,14 @@ AudioLiteRtCompiledModelExecutor::AudioStreamingEncoder::Initialize() {
         weight_cache_file, AudioExecutorSettings::kEncoderName, cpu_options));
 
     options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#if !defined(LITERT_DISABLE_NPU)
+  } else if (executor_settings_.GetBackend() == Backend::NPU) {
+    LITERT_ASSIGN_OR_RETURN(auto& google_tensor_options,
+                            options.GetGoogleTensorOptions());
+    google_tensor_options.SetPerformanceMode(
+        google_tensor::GoogleTensorOptions::PerformanceMode::kBurst);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#endif  // !defined(LITERT_DISABLE_NPU)
   } else {
     return absl::InvalidArgumentError(
         absl::StrCat("Unsupported backend for AudioEncoder: ",
@@ -518,6 +552,26 @@ absl::Status AudioLiteRtCompiledModelExecutor::AudioAdapter::Initialize() {
       /*check_and_clean=*/true);
   if (executor_settings_.GetBackend() == Backend::GPU) {
     LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
+    ASSIGN_OR_RETURN(auto model_path,
+                     executor_settings_.GetModelAssets().GetPath());
+    absl::string_view model_basename = Basename(model_path);
+    auto program_cache_file = executor_settings_.GetProgramCacheFile(
+        absl::StrCat(AudioExecutorSettings::kAdapterName,
+                     ExecutorSettingsBase::kMlDriftCacheSuffix),
+        /*check_and_clean=*/true);
+    auto weight_cache_file = executor_settings_.GetWeightCacheFile(
+        absl::StrCat(AudioExecutorSettings::kAdapterName,
+                     ExecutorSettingsBase::kMlDriftCacheSuffix),
+        /*check_and_clean=*/true);
+    ASSIGN_OR_RETURN(std::string metadata_id,
+                     GetFileCacheIdentifier(model_path));
+    RETURN_IF_ERROR(SetGpuCacheOptions(
+        weight_cache_file, program_cache_file,
+        absl::StrCat(model_basename, AudioExecutorSettings::kAdapterName, "_",
+                     metadata_id),
+        /*logging_prefix=*/AudioExecutorSettings::kAdapterName,
+        /*cache_compiled_shaders_only=*/false, gpu_options));
+
     gpu_options.EnableConstantTensorSharing(true);
     gpu_options.SetPrecision(GpuOptions::Precision::kFp32);
     gpu_options.SetPreferTextureWeights(true);
@@ -533,6 +587,14 @@ absl::Status AudioLiteRtCompiledModelExecutor::AudioAdapter::Initialize() {
         weight_cache_file, AudioExecutorSettings::kAdapterName, cpu_options));
 
     options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#if !defined(LITERT_DISABLE_NPU)
+  } else if (executor_settings_.GetBackend() == Backend::NPU) {
+    LITERT_ASSIGN_OR_RETURN(auto& google_tensor_options,
+                            options.GetGoogleTensorOptions());
+    google_tensor_options.SetPerformanceMode(
+        google_tensor::GoogleTensorOptions::PerformanceMode::kBurst);
+    options.SetHardwareAccelerators(litert::HwAccelerators::kCpu);
+#endif  // !defined(LITERT_DISABLE_NPU)
   } else {
     return absl::InvalidArgumentError(
         absl::StrCat("Unsupported backend for AudioAdapter: ",

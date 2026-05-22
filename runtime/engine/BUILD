@@ -45,6 +45,7 @@ cc_library(
     name = "engine_factory",
     hdrs = ["engine_factory.h"],
     deps = [
+        ":cpu_affinity_utils",
         ":engine_interface",
         ":engine_settings",
         "@com_google_absl//absl/functional:any_invocable",
@@ -64,8 +65,22 @@ cc_library(
 cc_library(
     name = "engine_impl_selected",
     deps = select({
-        "//conditions:default": ["//runtime/core:engine_impl"],
+        "//conditions:default": ["//runtime/core:engine_advanced_impl"],
     }),
+    alwayslink = 1,
+)
+
+cc_library(
+    name = "cpu_affinity_utils",
+    srcs = ["cpu_affinity_utils.cc"],
+    hdrs = ["cpu_affinity_utils.h"],
+    deps = [
+        "@com_google_absl//absl/log:absl_log",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "//runtime/util:litert_status_util",
+    ],
 )
 
 cc_library(
@@ -154,6 +169,7 @@ cc_library(
         "//runtime/components/constrained_decoding:llg_constraint_config",
         "//runtime/conversation",
         "//runtime/conversation:io_types",
+        "//runtime/conversation/model_data_processor:gemma4_data_processor_config",
         "//runtime/executor:executor_settings_base",
         "//runtime/executor:llm_executor_settings",
         "//runtime/proto:sampler_params_cc_proto",

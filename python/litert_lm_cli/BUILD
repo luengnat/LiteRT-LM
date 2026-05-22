@@ -24,6 +24,10 @@ load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 load("//:version.bzl", "VERSION")
 
+package(
+    default_visibility = ["//python/litert_lm_cli:__subpackages__"],
+)
+
 version = select({
     "//python:dev_build": VERSION + ".dev$(DEV_VERSION)",
     "//conditions:default": VERSION,
@@ -40,11 +44,9 @@ pytype_strict_library(
     srcs = ["model.py"],
     deps = [
         "//python/litert_lm",
+        "//python/litert_lm_builder:litertlm_peek",
         requirement("click"),
-        requirement("prompt_toolkit"),
-    ] + select({
-        "//conditions:default": [],
-    }),
+    ],
     imports = [".."],
 )
 
@@ -75,12 +77,11 @@ pytype_strict_library(
 )
 
 pytype_strict_library(
-    name = "serve",
-    srcs = ["serve.py"],
+    name = "common",
+    srcs = ["common.py"],
     deps = [
-        ":model",
-        "//python/litert_lm",
         requirement("click"),
+        requirement("huggingface_hub"),
     ],
     imports = [".."],
 )
@@ -106,13 +107,17 @@ pytype_strict_library(
     srcs = ["main.py"],
     deps = [
         ":help_formatter",
-        ":model",
-        ":serve",
-        ":venv_manager",
         ":version",
         "//python/litert_lm",
+        "//python/litert_lm_cli/commands:benchmark",
+        "//python/litert_lm_cli/commands:convert",
+        "//python/litert_lm_cli/commands:delete",
+        "//python/litert_lm_cli/commands:import",
+        "//python/litert_lm_cli/commands:list",
+        "//python/litert_lm_cli/commands:rename",
+        "//python/litert_lm_cli/commands:run",
+        "//python/litert_lm_cli/commands:serve",
         requirement("click"),
-        requirement("huggingface_hub"),
     ],
     imports = [".."],
 )
@@ -124,27 +129,13 @@ py_test(
         "nowindows",
     ],
     deps = [
+        ":common",
         ":main_lib",
         ":model",
+        "//python/litert_lm_cli/commands:run",
         "@absl_py//absl/testing:absltest",
         requirement("click"),
         requirement("prompt_toolkit"),
-    ],
-    imports = [".."],
-)
-
-py_test(
-    name = "serve_test",
-    srcs = ["serve_test.py"],
-    tags = [
-        "nowindows",
-    ],
-    deps = [
-        ":serve",
-        "//python/litert_lm",
-        "//python/litert_lm:interfaces",
-        "@absl_py//absl/testing:absltest",
-        "@absl_py//absl/testing:parameterized",
     ],
     imports = [".."],
 )
@@ -197,13 +188,19 @@ py_wheel(
             "litert-lm = litert_lm_cli.main:main",
         ],
     },
-    requires = select({
-        "//python:dev_build": ["litert-lm-api-nightly"],
-        "//conditions:default": ["litert-lm-api"],
-    }) + [
-        "click",
-        "huggingface_hub",
-        "prompt_toolkit",
-    ],
+    requires_file = ":gen_requires",
     deps = [":package"],
+)
+
+genrule(
+    name = "gen_requires",
+    outs = ["requires.txt"],
+    cmd = select({
+        "//python:dev_build": "echo 'litert-lm-api-nightly==" + VERSION + ".dev$(DEV_VERSION)' > $@ && echo 'litert-lm-builder-nightly==" + VERSION + ".dev$(DEV_VERSION)' >> $@",
+        "//conditions:default": "echo 'litert-lm-api==" + VERSION + "' > $@ && echo 'litert-lm-builder==" + VERSION + "' >> $@",
+    }) + """
+        echo 'click' >> $@
+        echo 'huggingface_hub' >> $@
+        echo 'prompt_toolkit' >> $@
+    """,
 )

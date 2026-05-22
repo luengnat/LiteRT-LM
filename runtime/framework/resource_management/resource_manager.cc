@@ -23,6 +23,7 @@
 
 #include "absl/base/nullability.h"  // from @com_google_absl
 #include "absl/container/flat_hash_map.h"  // from @com_google_absl
+#include "absl/log/absl_log.h"  // from @com_google_absl
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/str_cat.h"  // from @com_google_absl
@@ -455,6 +456,23 @@ class LockedLlmExecutor : public LlmExecutor {
   MovableMutexLock lock_;
 };
 
+ResourceManager::ResourceManager(
+    ModelResources* absl_nullable model_resources,
+    std::unique_ptr<LlmExecutor> llm_executor,
+    std::unique_ptr<VisionExecutorSettings> vision_executor_settings,
+    std::unique_ptr<AudioExecutorSettings> audio_executor_settings,
+    LlmExecutorSettings llm_executor_settings,
+    ::litert::Environment* absl_nullable litert_env,
+    std::unique_ptr<AudioExecutor> audio_executor)
+    :  // dummy comment to prevent clang-format from moving the next line here
+      llm_executor_(std::move(llm_executor)),
+      vision_executor_settings_(std::move(vision_executor_settings)),
+      audio_executor_(std::move(audio_executor)),
+      audio_executor_settings_(std::move(audio_executor_settings)),
+      litert_env_(litert_env),
+      llm_executor_settings_(std::move(llm_executor_settings)) {
+}
+
 std::optional<uint32_t> ResourceManager::AssignLoraId(
     std::string lora_path, bool has_scoped_lora_file) {
   if (lora_path.empty() && !has_scoped_lora_file) {
@@ -721,8 +739,19 @@ ResourceManager::AcquireExecutorWithContextHandler(
 }
 
 absl::Status ResourceManager::TryLoadingVisionExecutor() {
-  return absl::InvalidArgumentError(
-      "Vision executor backend is not supported.");
+  absl::MutexLock lock(vision_executor_mutex_);
+  if (vision_executor_ != nullptr) {
+    return absl::OkStatus();
+  }
+  if (!vision_executor_settings_) {
+    return absl::InvalidArgumentError("Vision options should not be null.");
+  }
+
+  RETURN_IF_ERROR(MaybeCreateLitertEnv());
+  ASSIGN_OR_RETURN(vision_executor_,
+                   VisionLiteRtCompiledModelExecutor::Create(
+                       *vision_executor_settings_, *litert_env_));
+  return absl::OkStatus();
 }
 
 absl::StatusOr<std::unique_ptr<VisionExecutor>>
@@ -755,8 +784,10 @@ absl::Status ResourceManager::TryLoadingAudioExecutor() {
   }
   if (audio_executor_settings_->GetBackend() == litert::lm::Backend::CPU ||
       audio_executor_settings_->GetBackend() == litert::lm::Backend::GPU) {
-    return absl::InvalidArgumentError(
-        "Audio executor backend is not supported.");
+    RETURN_IF_ERROR(MaybeCreateLitertEnv());
+    ASSIGN_OR_RETURN(audio_executor_,
+                     litert::lm::AudioLiteRtCompiledModelExecutor::Create(
+                         *audio_executor_settings_, *litert_env_));
   } else {
     return absl::InvalidArgumentError(
         "Audio executor backend is not supported.");

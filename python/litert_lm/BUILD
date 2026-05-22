@@ -19,6 +19,7 @@ load(
 # [Google-internal load of `cc_binary`]
 
 load("@rules_python//python:defs.bzl", "py_test")
+load("//python/litert_lm:cc_runfiles.bzl", "cc_runfiles")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -63,6 +64,8 @@ cc_binary(
         "@nlohmann_json//:json",
         "//runtime/conversation",
         "//runtime/conversation:io_types",
+        "//runtime/conversation/model_data_processor:config_registry",
+        "//runtime/conversation/model_data_processor:gemma4_data_processor_config",
         "//runtime/core:engine_impl",
         "//runtime/engine:engine_factory",
         "//runtime/engine:engine_interface",
@@ -81,6 +84,12 @@ cc_binary(
 pytype_strict_library(
     name = "interfaces",
     srcs = ["interfaces.py"],
+    deps = [":_messages"],
+)
+
+pytype_strict_library(
+    name = "_messages",
+    srcs = ["_messages.py"],
 )
 
 pytype_strict_library(
@@ -117,6 +126,7 @@ pytype_strict_library(
     srcs = ["conversation.py"],
     deps = [
         ":_ffi",
+        ":_messages",
         ":interfaces",
     ],
 )
@@ -126,6 +136,7 @@ pytype_strict_library(
     srcs = ["engine.py"],
     deps = [
         ":_ffi",
+        ":_messages",
         ":conversation",
         ":interfaces",
         ":session",
@@ -159,6 +170,7 @@ pytype_strict_library(
     }),
     deps = [
         ":_ffi",
+        ":_messages",
         ":benchmark",
         ":conversation",
         ":engine",
@@ -195,6 +207,18 @@ py_test(
     imports = [".."],
 )
 
+py_test(
+    name = "messages_test",
+    srcs = ["messages_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":litert_lm",
+        "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
+    ],
+    imports = [".."],
+)
+
 load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
 load("//:version.bzl", "VERSION")
@@ -221,7 +245,7 @@ genrule(
             for i in $${!SRCS_ARRAY[@]}; do
                 cp $${SRCS_ARRAY[$$i]} $${OUTS_ARRAY[$$i]}
                 # Set the rpath to '$$ORIGIN'
-                patchelf --set-rpath '$$ORIGIN' $${OUTS_ARRAY[$$i]}
+                $(location //build_config:patchelf_exe) --set-rpath '$$ORIGIN' $${OUTS_ARRAY[$$i]}
             done
         else
             for out in $${OUTS_ARRAY[@]}; do
@@ -230,6 +254,7 @@ genrule(
         fi
     """,
     tags = ["manual"],
+    tools = ["//build_config:patchelf_exe"],
 )
 
 genrule(
@@ -269,12 +294,13 @@ genrule(
         if [ $${#SRCS_ARRAY[@]} -gt 0 ]; then
             cp $${SRCS_ARRAY[0]} $${OUTS_ARRAY[0]}
             chmod +w $${OUTS_ARRAY[0]}
-            patchelf --set-rpath '$$ORIGIN' $${OUTS_ARRAY[0]}
+            $(location //build_config:patchelf_exe) --set-rpath '$$ORIGIN' $${OUTS_ARRAY[0]}
         else
             touch $${OUTS_ARRAY[0]}
         fi
     """,
     tags = ["manual"],
+    tools = ["//build_config:patchelf_exe"],
 )
 
 copy_file(
@@ -303,6 +329,13 @@ copy_file(
     out = "dxil.dll",
 )
 
+# Uncomment when LiteRtDispatch becomes public
+# copy_file(
+#     name = "copy_openvino_dispatch_dll",
+#     src = "@litert//litert/vendors/intel_openvino/dispatch:LiteRtDispatch",
+#     out = "vendors/intel_openvino/dispatch/LiteRtDispatch.dll",
+# )
+
 filegroup(
     name = "prebuilt_litert_lm_lib",
     srcs = select({
@@ -313,6 +346,8 @@ filegroup(
             ":copy_prebuilt_litert_lm_dll",
             ":copy_dxcompiler_dll",
             ":copy_dxil_dll",
+            # Uncomment when LiteRtDispatch becomes public
+            # ":copy_openvino_dispatch_dll",
         ],
         ":wheel_platform_linux_x86_64": [":copy_prebuilt_litert_lm_so"],
         ":wheel_platform_linux_arm64": [":copy_prebuilt_litert_lm_so"],
@@ -321,18 +356,30 @@ filegroup(
     }),
 )
 
+# On Windows, copy the .dll from runfiles to avoid the Bazel duplicated
+# labels.
+cc_runfiles(
+    name = "litert_lm_windows_runfiles",
+    cc_binary = ":litert-lm",
+)
+
 filegroup(
     name = "default_libs",
-    srcs = ["//python/litert_lm:litert-lm"] + select({
+    srcs = select({
+        "@platforms//os:windows": [":litert_lm_windows_runfiles"],
+        "//conditions:default": ["//python/litert_lm:litert-lm"],
+    }) + select({
         "@platforms//os:macos": [":copy_prebuilt_libs_dylib"],
         "@platforms//os:windows": [
             ":copy_dxcompiler_dll",
             ":copy_dxil_dll",
+            # Uncomment when LiteRtDispatch becomes public
+            # ":copy_openvino_dispatch_dll",
         ],
-        "//conditions:default":  [":copy_prebuilt_libs_so"],
+        "@platforms//os:linux": [":copy_prebuilt_libs_so"],
+        "//conditions:default":  [],
     }),
 )
-
 
 # Use "wheel_platform" to allow cross-compliling the wheel package.
 config_setting(

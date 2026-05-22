@@ -543,12 +543,15 @@ cc_library(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@litert//litert/c:litert_layout",
+        "//runtime/util:litert_status_util",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
         ],
         "//conditions:default": [
             "@litert//litert/cc:litert_element_type",
+            "@litert//litert/cc:litert_layout",
             "@litert//litert/cc:litert_macros",
             "@litert//litert/cc:litert_ranked_tensor_type",
             "@litert//litert/cc:litert_tensor_buffer",
@@ -565,6 +568,7 @@ cc_test(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
+        "//runtime/util:litert_status_util",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
             "@litert//litert/cc:litert_api_with_dynamic_runtime",
@@ -592,6 +596,7 @@ cc_library(
         ":llm_executor_processed_tokens",
         ":llm_executor_settings",
         ":llm_litert_npu_compiled_model_executor_utils",
+        ":llm_processed_context",
         "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
@@ -612,6 +617,7 @@ cc_library(
         "//runtime/components/embedding_lookup:embedding_lookup_manager",
         "//runtime/util:convert_tensor_buffer",
         "//runtime/util:litert_status_util",
+        "//runtime/util:tensor_buffer_util",
         "@litert//tflite/types:half",
     ] + select({
         "@litert//litert:litert_link_capi_so": [
@@ -951,6 +957,7 @@ cc_library(
             "@litert//litert/cc:litert_ranked_tensor_type",
             "@litert//litert/cc:litert_tensor_buffer",
             "@litert//litert/cc/options:litert_cpu_options",
+            "@litert//litert/cc/options:litert_google_tensor_options",
             "@litert//litert/cc/options:litert_gpu_options",
             "@litert//litert/cc/options:litert_runtime_options",
         ],
