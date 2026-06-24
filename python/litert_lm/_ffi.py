@@ -87,6 +87,25 @@ class LogSeverity(enum.IntEnum):
   SILENT = 1000
 
 
+class ActivationDataType(enum.IntEnum):
+  """Activation data type for inference."""
+
+  FLOAT32 = 0
+  FLOAT16 = 1
+  INT16 = 2
+  INT8 = 3
+
+  @classmethod
+  def from_str(cls, val: str) -> ActivationDataType | None:
+    mapping = {
+        "fp32": cls.FLOAT32,
+        "fp16": cls.FLOAT16,
+        "int16": cls.INT16,
+        "int8": cls.INT8,
+    }
+    return mapping.get(val.lower())
+
+
 _LIB: ctypes.CDLL | None = None
 
 
@@ -114,7 +133,7 @@ def _get_lib() -> ctypes.CDLL:
 
   # 2. Fallback to direct path in runfiles for local development/Bazel
   if _LIB is None:
-    path = os.path.join(os.path.dirname(__file__), lib_name)
+    path = os.path.join(os.path.dirname(__file__), "../../c", lib_name)
     if os.path.exists(path):
       _LIB = ctypes.CDLL(path)
 
@@ -146,6 +165,18 @@ def _setup_lib_signatures(lib):
       ctypes.c_void_p,
       ctypes.c_int,
   ]
+  lib.litert_lm_engine_settings_set_max_num_images.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+  lib.litert_lm_engine_settings_set_num_threads.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+  lib.litert_lm_engine_settings_set_audio_num_threads.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
   lib.litert_lm_engine_settings_set_cache_dir.argtypes = [
       ctypes.c_void_p,
       c_string_p,
@@ -157,6 +188,32 @@ def _setup_lib_signatures(lib):
   lib.litert_lm_engine_settings_set_enable_speculative_decoding.argtypes = [
       ctypes.c_void_p,
       ctypes.c_bool,
+  ]
+  lib.litert_lm_engine_settings_set_activation_data_type.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+  lib.litert_lm_engine_settings_set_lora_rank.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+  lib.litert_lm_engine_settings_set_supported_lora_ranks.restype = ctypes.c_int
+  lib.litert_lm_engine_settings_set_supported_lora_ranks.argtypes = [
+      ctypes.c_void_p,
+      ctypes.POINTER(ctypes.c_int),
+      ctypes.c_size_t,
+  ]
+  lib.litert_lm_engine_settings_set_audio_lora_rank.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+  lib.litert_lm_engine_settings_set_supported_audio_lora_ranks.restype = (
+      ctypes.c_int
+  )
+  lib.litert_lm_engine_settings_set_supported_audio_lora_ranks.argtypes = [
+      ctypes.c_void_p,
+      ctypes.POINTER(ctypes.c_int),
+      ctypes.c_size_t,
   ]
   lib.litert_lm_engine_settings_enable_benchmark.argtypes = [ctypes.c_void_p]
   lib.litert_lm_engine_settings_set_num_prefill_tokens.argtypes = [
@@ -188,6 +245,16 @@ def _setup_lib_signatures(lib):
   lib.litert_lm_session_config_set_sampler_params.argtypes = [
       ctypes.c_void_p,
       ctypes.POINTER(LiteRtLmSamplerParams),
+  ]
+  lib.litert_lm_session_config_set_lora_path.restype = ctypes.c_int
+  lib.litert_lm_session_config_set_lora_path.argtypes = [
+      ctypes.c_void_p,
+      c_string_p,
+  ]
+  lib.litert_lm_session_config_set_audio_lora_path.restype = ctypes.c_int
+  lib.litert_lm_session_config_set_audio_lora_path.argtypes = [
+      ctypes.c_void_p,
+      c_string_p,
   ]
 
   # Session
@@ -267,6 +334,15 @@ def _setup_lib_signatures(lib):
       ctypes.c_bool,
   ]
 
+  # Conversation Optional Args
+  lib.litert_lm_conversation_optional_args_create.restype = ctypes.c_void_p
+  lib.litert_lm_conversation_optional_args_create.argtypes = []
+  lib.litert_lm_conversation_optional_args_delete.argtypes = [ctypes.c_void_p]
+  lib.litert_lm_conversation_optional_args_set_max_output_tokens.argtypes = [
+      ctypes.c_void_p,
+      ctypes.c_int,
+  ]
+
   # Conversation
   lib.litert_lm_conversation_create.restype = ctypes.c_void_p
   lib.litert_lm_conversation_create.argtypes = [
@@ -296,6 +372,8 @@ def _setup_lib_signatures(lib):
       ctypes.c_void_p,
       c_string_p,
   ]
+  lib.litert_lm_conversation_get_token_count.restype = ctypes.c_int
+  lib.litert_lm_conversation_get_token_count.argtypes = [ctypes.c_void_p]
 
   # interfaces.Responses
   lib.litert_lm_responses_delete.argtypes = [ctypes.c_void_p]

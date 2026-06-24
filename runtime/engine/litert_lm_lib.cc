@@ -47,10 +47,9 @@
 #include "absl/time/time.h"  // from @com_google_absl
 #include "nlohmann/json.hpp"  // from @nlohmann_json
 #include "litert/cc/internal/scoped_file.h"  // from @litert
-#include "runtime/components/constrained_decoding/constraint.h"
-#include "runtime/components/constrained_decoding/constraint_provider_factory.h"
-#include "runtime/components/constrained_decoding/llg_constraint_config.h"
-#include "runtime/components/tokenizer.h"
+#include "runtime/components/logits_processor/constrained_decoding/constraint.h"
+#include "runtime/components/logits_processor/constrained_decoding/constraint_provider_factory.h"
+#include "runtime/components/logits_processor/constrained_decoding/llg_constraint_config.h"
 #include "runtime/conversation/conversation.h"
 #include "runtime/conversation/io_types.h"
 #include "runtime/conversation/model_data_processor/gemma4_data_processor_config.h"
@@ -397,12 +396,16 @@ void LogBenchmarkInfo(const litert::lm::BenchmarkInfo& benchmark_info,
   if (!settings.log_sink_file.has_value()) {
     ABSL_LOG(INFO) << benchmark_info;
   } else {
+    std::string model_name_flag = "";
+    if (settings.model_name.has_value() && !settings.model_name->empty()) {
+      model_name_flag = absl::StrFormat(",model_name=%s", *settings.model_name);
+    }
     ABSL_LOG(INFO) << absl::StrFormat(
         "Benchmark flags: "
-        "benchmark_prefill_tokens=%d,benchmark_decode_tokens=%d,backend=%s",
+        "benchmark_prefill_tokens=%d,benchmark_decode_tokens=%d,backend=%s%s",
         benchmark_info.GetBenchmarkParams().num_prefill_tokens(),
         benchmark_info.GetBenchmarkParams().num_decode_tokens(),
-        settings.backend);
+        settings.backend, model_name_flag);
     for (const auto& phase : benchmark_info.GetInitPhases()) {
       ABSL_LOG(INFO) << absl::StrFormat(
           "%s: %.2f ms", phase.first, absl::ToDoubleMilliseconds(phase.second));
@@ -500,16 +503,23 @@ absl::StatusOr<EngineSettings> CreateEngineSettings(
       engine_settings.GetMutableAudioExecutorSettings()->SetCacheDir(
           ":nocache");
     }
-  } else if (!settings.cache_dir.empty()) {
-    engine_settings.GetMutableMainExecutorSettings().SetCacheDir(
-        settings.cache_dir);
-    if (settings.vision_backend.has_value()) {
-      engine_settings.GetMutableVisionExecutorSettings()->SetCacheDir(
-          settings.cache_dir);
+  } else {
+    auto configure_caches = [&](auto& executor_settings) {
+      if (!settings.cache_dir.empty()) {
+        executor_settings.SetCacheDir(settings.cache_dir);
+      }
+      executor_settings.SetDisableWeightCache(settings.disable_weight_cache);
+      executor_settings.SetDisableProgramCache(
+          settings.disable_gpu_program_cache);
+    };
+    configure_caches(engine_settings.GetMutableMainExecutorSettings());
+    if (settings.vision_backend.has_value() &&
+        engine_settings.GetMutableVisionExecutorSettings().has_value()) {
+      configure_caches(*engine_settings.GetMutableVisionExecutorSettings());
     }
-    if (settings.audio_backend.has_value()) {
-      engine_settings.GetMutableAudioExecutorSettings()->SetCacheDir(
-          settings.cache_dir);
+    if (settings.audio_backend.has_value() &&
+        engine_settings.GetMutableAudioExecutorSettings().has_value()) {
+      configure_caches(*engine_settings.GetMutableAudioExecutorSettings());
     }
   }
   if (!settings.litert_dispatch_lib_dir.empty()) {

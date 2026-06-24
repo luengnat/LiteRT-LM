@@ -15,8 +15,12 @@
 #include "c/engine.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <memory>
+#if defined(_WIN32)
+#include <io.h>
+#endif
 #include <optional>
 #include <string>
 #include <utility>
@@ -44,6 +48,7 @@
 #include "runtime/proto/sampler_params.pb.h"
 #include "runtime/proto/token.pb.h"
 #include "runtime/util/logging.h"
+#include "runtime/util/scoped_file.h"
 
 namespace {
 
@@ -108,7 +113,8 @@ std::optional<litert::lm::DataProcessorArguments> GetDataProcessorArguments(
 
 litert::lm::OptionalArgs CreateOptionalArgs(
     const litert::lm::Conversation* conversation, const char* extra_context,
-    std::optional<int> visual_token_budget) {
+    std::optional<int> visual_token_budget,
+    std::optional<int> max_output_tokens) {
   litert::lm::OptionalArgs litert_lm_optional_args;
   if (extra_context) {
     auto extra_context_json =
@@ -120,6 +126,9 @@ litert::lm::OptionalArgs CreateOptionalArgs(
   if (visual_token_budget.has_value()) {
     litert_lm_optional_args.args =
         GetDataProcessorArguments(conversation, *visual_token_budget);
+  }
+  if (max_output_tokens.has_value()) {
+    litert_lm_optional_args.max_output_tokens = max_output_tokens;
   }
   return litert_lm_optional_args;
 }
@@ -160,9 +169,9 @@ using ::litert::lm::ConversationConfig;
 using ::litert::lm::Engine;
 using ::litert::lm::EngineFactory;
 using ::litert::lm::EngineSettings;
-using ::litert::lm::InputText;
 using ::litert::lm::OptionalArgs;
 
+using ::litert::lm::ScopedFile;
 using ::litert::lm::Message;
 using ::litert::lm::ModelAssets;
 using ::litert::lm::Responses;
@@ -172,6 +181,49 @@ using ::litert::lm::proto::SamplerParameters;
 struct LiteRtLmEngineSettings {
   std::unique_ptr<EngineSettings> settings;
 };
+
+static LiteRtLmEngineSettings* CreateEngineSettingsHelper(
+    ModelAssets model_assets, absl::string_view backend_str,
+    absl::string_view vision_backend_str, absl::string_view audio_backend_str) {
+  auto backend = litert::lm::GetBackendFromString(backend_str);
+  if (!backend.ok()) {
+    ABSL_LOG(ERROR) << "Failed to parse backend: " << backend.status();
+    return nullptr;
+  }
+
+  std::optional<litert::lm::Backend> vision_backend;
+  if (!vision_backend_str.empty()) {
+    auto backend = litert::lm::GetBackendFromString(vision_backend_str);
+    if (!backend.ok()) {
+      ABSL_LOG(ERROR) << "Failed to parse vision backend: " << backend.status();
+      return nullptr;
+    }
+    vision_backend = *backend;
+  }
+
+  std::optional<litert::lm::Backend> audio_backend;
+  if (!audio_backend_str.empty()) {
+    auto backend = litert::lm::GetBackendFromString(audio_backend_str);
+    if (!backend.ok()) {
+      ABSL_LOG(ERROR) << "Failed to parse audio backend: " << backend.status();
+      return nullptr;
+    }
+    audio_backend = *backend;
+  }
+
+  auto engine_settings = EngineSettings::CreateDefault(
+      std::move(model_assets), *backend, vision_backend, audio_backend);
+  if (!engine_settings.ok()) {
+    ABSL_LOG(ERROR) << "Failed to create engine settings: "
+                    << engine_settings.status();
+    return nullptr;
+  }
+
+  auto* c_settings = new LiteRtLmEngineSettings;
+  c_settings->settings =
+      std::make_unique<EngineSettings>(std::move(*engine_settings));
+  return c_settings;
+}
 
 struct LiteRtLmEngine {
   std::unique_ptr<Engine> engine;
@@ -197,6 +249,9 @@ struct LiteRtLmConversation {
   // ensuring memory safety for the C API caller without requiring explicit
   // per-call deallocation.
   std::string last_rendered_message;
+  // This field stores the result of the last call to
+  // `litert_lm_conversation_render_preface_to_string`.
+  std::string last_rendered_preface;
 };
 
 struct LiteRtLmJsonResponse {
@@ -217,10 +272,13 @@ struct LiteRtLmConversationConfig {
   std::string extra_context_json;
   bool enable_constrained_decoding = false;
   bool filter_channel_content_from_kv_cache = false;
+  bool stream_tool_calls = false;
+  std::string stream_tool_calls_channel_name = "tool_call";
 };
 
 struct LiteRtLmConversationOptionalArgs {
   std::optional<int> visual_token_budget;
+  std::optional<int> max_output_tokens;
 };
 
 struct LiteRtLmDetokenizeResult {
@@ -299,6 +357,44 @@ void litert_lm_session_config_delete(LiteRtLmSessionConfig* config) {
   delete config;
 }
 
+int litert_lm_session_config_set_lora_path(LiteRtLmSessionConfig* config,
+                                           const char* lora_path) {
+  if (!config || !config->config || !lora_path) {
+    return -1;
+  }
+  absl::string_view path_view(lora_path);
+  if (path_view.empty()) {
+    return -1;
+  }
+  auto lora_file = litert::lm::ScopedFile::Open(path_view);
+  if (!lora_file.ok()) {
+    ABSL_LOG(ERROR) << "Failed to open LoRA file: " << lora_file.status();
+    return -1;
+  }
+  config->config->SetScopedLoraFile(
+      std::make_shared<litert::lm::ScopedFile>(std::move(*lora_file)));
+  return 0;
+}
+
+int litert_lm_session_config_set_audio_lora_path(LiteRtLmSessionConfig* config,
+                                                 const char* audio_lora_path) {
+  if (!config || !config->config || !audio_lora_path) {
+    return -1;
+  }
+  absl::string_view path_view(audio_lora_path);
+  if (path_view.empty()) {
+    return -1;
+  }
+  auto lora_file = litert::lm::ScopedFile::Open(path_view);
+  if (!lora_file.ok()) {
+    ABSL_LOG(ERROR) << "Failed to open Audio LoRA file: " << lora_file.status();
+    return -1;
+  }
+  config->config->SetAudioScopedLoraFile(
+      std::make_shared<litert::lm::ScopedFile>(std::move(*lora_file)));
+  return 0;
+}
+
 LiteRtLmConversationConfig* litert_lm_conversation_config_create() {
   return new LiteRtLmConversationConfig;
 }
@@ -355,6 +451,17 @@ void litert_lm_conversation_config_set_filter_channel_content_from_kv_cache(
   }
 }
 
+void litert_lm_conversation_config_set_stream_tool_calls(
+    LiteRtLmConversationConfig* config, bool stream_tool_calls,
+    const char* channel_name) {
+  if (config) {
+    config->stream_tool_calls = stream_tool_calls;
+    if (channel_name != nullptr) {
+      config->stream_tool_calls_channel_name = channel_name;
+    }
+  }
+}
+
 void litert_lm_conversation_config_delete(LiteRtLmConversationConfig* config) {
   delete config;
 }
@@ -368,6 +475,13 @@ void litert_lm_conversation_optional_args_set_visual_token_budget(
     LiteRtLmConversationOptionalArgs* args, int visual_token_budget) {
   if (args) {
     args->visual_token_budget = visual_token_budget;
+  }
+}
+
+void litert_lm_conversation_optional_args_set_max_output_tokens(
+    LiteRtLmConversationOptionalArgs* args, int max_output_tokens) {
+  if (args) {
+    args->max_output_tokens = max_output_tokens;
   }
 }
 
@@ -385,46 +499,41 @@ LiteRtLmEngineSettings* litert_lm_engine_settings_create(
                     << model_assets.status();
     return nullptr;
   }
-  auto backend = litert::lm::GetBackendFromString(backend_str);
-  if (!backend.ok()) {
-    ABSL_LOG(ERROR) << "Failed to parse backend: " << backend.status();
-    return nullptr;
-  }
-
-  std::optional<litert::lm::Backend> vision_backend;
-  if (vision_backend_str) {
-    auto backend = litert::lm::GetBackendFromString(vision_backend_str);
-    if (!backend.ok()) {
-      ABSL_LOG(ERROR) << "Failed to parse vision backend: " << backend.status();
-      return nullptr;
-    }
-    vision_backend = *backend;
-  }
-
-  std::optional<litert::lm::Backend> audio_backend;
-  if (audio_backend_str) {
-    auto backend = litert::lm::GetBackendFromString(audio_backend_str);
-    if (!backend.ok()) {
-      ABSL_LOG(ERROR) << "Failed to parse audio backend: " << backend.status();
-      return nullptr;
-    }
-    audio_backend = *backend;
-  }
-
-  auto engine_settings = EngineSettings::CreateDefault(
-      *std::move(model_assets), *backend, vision_backend, audio_backend);
-  if (!engine_settings.ok()) {
-    ABSL_LOG(ERROR) << "Failed to create engine settings: "
-                    << engine_settings.status();
-    return nullptr;
-  }
-
-  auto* c_settings = new LiteRtLmEngineSettings;
-  c_settings->settings =
-      std::make_unique<EngineSettings>(*std::move(engine_settings));
-  return c_settings;
+  return CreateEngineSettingsHelper(
+      std::move(*model_assets), absl::NullSafeStringView(backend_str),
+      absl::NullSafeStringView(vision_backend_str),
+      absl::NullSafeStringView(audio_backend_str));
 }
 
+LiteRtLmEngineSettings*
+litert_lm_engine_settings_create_from_raw_file_descriptor(
+    int fd, const char* backend_str, const char* vision_backend_str,
+    const char* audio_backend_str) {
+  if (fd < 0) {
+    ABSL_LOG(ERROR) << "Invalid file descriptor: " << fd;
+    return nullptr;
+  }
+  auto model_assets = ModelAssets::Create(
+#if defined(_WIN32)
+      std::make_shared<litert::lm::ScopedFile>(litert::lm::ScopedFile(
+          reinterpret_cast<litert::lm::ScopedFile::PlatformFile>(
+              _get_osfhandle(fd)))));
+#else
+      std::make_shared<litert::lm::ScopedFile>(litert::lm::ScopedFile(fd)));
+#endif
+  if (!model_assets.ok()) {
+    ABSL_LOG(ERROR) << "Failed to create model assets from raw FD: "
+                    << model_assets.status();
+    return nullptr;
+  }
+  ABSL_LOG(INFO) << "LiteRT-LM successfully created EngineSettings directly "
+                    "from raw File Descriptor: "
+                 << fd;
+  return CreateEngineSettingsHelper(
+      std::move(*model_assets), absl::NullSafeStringView(backend_str),
+      absl::NullSafeStringView(vision_backend_str),
+      absl::NullSafeStringView(audio_backend_str));
+}
 void litert_lm_engine_settings_delete(LiteRtLmEngineSettings* settings) {
   delete settings;
 }
@@ -436,6 +545,34 @@ void litert_lm_engine_settings_set_max_num_tokens(
         max_num_tokens);
   }
 }
+
+void litert_lm_engine_settings_set_num_threads(LiteRtLmEngineSettings* settings,
+                                               int num_threads) {
+  if (settings && settings->settings) {
+    auto& main_settings = settings->settings->GetMutableMainExecutorSettings();
+    auto config = main_settings.MutableBackendConfig<litert::lm::CpuConfig>();
+    if (config.ok()) {
+      litert::lm::CpuConfig cpu_config = *config;
+      cpu_config.number_of_threads = num_threads;
+      main_settings.SetBackendConfig(cpu_config);
+    } else {
+      ABSL_LOG(WARNING) << "Failed to get CpuConfig to set num threads: "
+                        << config.status();
+    }
+  }
+}
+
+void litert_lm_engine_settings_set_audio_num_threads(
+    LiteRtLmEngineSettings* settings, int num_threads) {
+  if (settings && settings->settings) {
+    auto& audio_settings =
+        settings->settings->GetMutableAudioExecutorSettings();
+    if (audio_settings.has_value()) {
+      audio_settings->SetNumThreads(num_threads);
+    }
+  }
+}
+
 void litert_lm_engine_settings_set_parallel_file_section_loading(
     LiteRtLmEngineSettings* settings, bool parallel_file_section_loading) {
   if (settings && settings->settings) {
@@ -509,6 +646,55 @@ void litert_lm_engine_settings_set_enable_speculative_decoding(
     advanced_settings.enable_speculative_decoding = enable_speculative_decoding;
     main_settings.SetAdvancedSettings(advanced_settings);
   }
+}
+
+void litert_lm_engine_settings_set_lora_rank(LiteRtLmEngineSettings* settings,
+                                             int lora_rank) {
+  if (settings && settings->settings) {
+    settings->settings->GetMutableMainExecutorSettings().SetLoraRank(lora_rank);
+  }
+}
+
+int litert_lm_engine_settings_set_supported_lora_ranks(
+    LiteRtLmEngineSettings* settings, const int* lora_ranks, size_t num_ranks) {
+  if (!settings || !settings->settings || !lora_ranks || num_ranks == 0) {
+    return -1;
+  }
+  std::vector<uint32_t> ranks;
+  ranks.reserve(num_ranks);
+  for (size_t i = 0; i < num_ranks; ++i) {
+    ranks.push_back(static_cast<uint32_t>(lora_ranks[i]));
+  }
+  auto status = settings->settings->GetMutableMainExecutorSettings()
+                    .SetSupportedLoraRanks(ranks);
+  return status.ok() ? 0 : -1;
+}
+
+void litert_lm_engine_settings_set_audio_lora_rank(
+    LiteRtLmEngineSettings* settings, int lora_rank) {
+  if (settings && settings->settings &&
+      settings->settings->GetAudioExecutorSettings().has_value()) {
+    settings->settings->GetMutableAudioExecutorSettings()->SetLoraRank(
+        lora_rank);
+  }
+}
+
+int litert_lm_engine_settings_set_supported_audio_lora_ranks(
+    LiteRtLmEngineSettings* settings, const int* lora_ranks, size_t num_ranks) {
+  if (!settings || !settings->settings || !lora_ranks || num_ranks == 0) {
+    return -1;
+  }
+  if (!settings->settings->GetAudioExecutorSettings().has_value()) {
+    return -1;
+  }
+  std::vector<uint32_t> ranks;
+  ranks.reserve(num_ranks);
+  for (size_t i = 0; i < num_ranks; ++i) {
+    ranks.push_back(static_cast<uint32_t>(lora_ranks[i]));
+  }
+  auto status = settings->settings->GetMutableAudioExecutorSettings()
+                    ->SetSupportedLoraRanks(ranks);
+  return status.ok() ? 0 : -1;
 }
 
 void litert_lm_engine_settings_set_activation_data_type(
@@ -969,6 +1155,8 @@ LiteRtLmConversation* litert_lm_conversation_create(
     builder.SetEnableConstrainedDecoding(c_config->enable_constrained_decoding);
     builder.SetFilterChannelContentFromKvCache(
         c_config->filter_channel_content_from_kv_cache);
+    builder.SetStreamToolCalls(c_config->stream_tool_calls,
+                               c_config->stream_tool_calls_channel_name);
     auto config = builder.Build(*engine->engine);
 
     if (!config.ok()) {
@@ -1035,8 +1223,8 @@ LiteRtLmJsonResponse* litert_lm_conversation_send_message(
 
   OptionalArgs litert_lm_optional_args = CreateOptionalArgs(
       conversation->conversation.get(), extra_context,
-      optional_args ? std::optional<int>(optional_args->visual_token_budget)
-                    : std::nullopt);
+      optional_args ? optional_args->visual_token_budget : std::nullopt,
+      optional_args ? optional_args->max_output_tokens : std::nullopt);
 
   auto response = conversation->conversation->SendMessage(
       json_message, std::move(litert_lm_optional_args));
@@ -1079,8 +1267,8 @@ int litert_lm_conversation_send_message_stream(
 
   litert::lm::OptionalArgs litert_lm_optional_args = CreateOptionalArgs(
       conversation->conversation.get(), extra_context,
-      optional_args ? std::optional<int>(optional_args->visual_token_budget)
-                    : std::nullopt);
+      optional_args ? optional_args->visual_token_budget : std::nullopt,
+      optional_args ? optional_args->max_output_tokens : std::nullopt);
 
   absl::Status status = conversation->conversation->SendMessageAsync(
       json_message, CreateConversationCallback(callback, callback_data),
@@ -1116,6 +1304,21 @@ const char* litert_lm_conversation_render_message_to_string(
   return conversation->last_rendered_message.c_str();
 }
 
+const char* litert_lm_conversation_render_preface_to_string(
+    LiteRtLmConversation* conversation) {
+  if (!conversation || !conversation->conversation) {
+    return nullptr;
+  }
+  auto rendered = conversation->conversation->RenderPrefaceIntoString(
+      litert::lm::OptionalArgs());
+  if (!rendered.ok()) {
+    ABSL_LOG(ERROR) << "Failed to render preface: " << rendered.status();
+    return nullptr;
+  }
+  conversation->last_rendered_preface = std::move(*rendered);
+  return conversation->last_rendered_preface.c_str();
+}
+
 void litert_lm_conversation_cancel_process(LiteRtLmConversation* conversation) {
   if (!conversation || !conversation->conversation) {
     return;
@@ -1135,6 +1338,18 @@ LiteRtLmBenchmarkInfo* litert_lm_conversation_get_benchmark_info(
     return nullptr;
   }
   return new LiteRtLmBenchmarkInfo{std::move(*benchmark_info)};
+}
+
+int litert_lm_conversation_get_token_count(LiteRtLmConversation* conversation) {
+  if (!conversation || !conversation->conversation) {
+    return -1;
+  }
+  absl::StatusOr<int> token_count = conversation->conversation->GetTokenCount();
+  if (!token_count.ok()) {
+    ABSL_LOG(ERROR) << "Failed to get token count: " << token_count.status();
+    return -1;
+  }
+  return *token_count;
 }
 
 LiteRtLmTokenizeResult* litert_lm_engine_tokenize(LiteRtLmEngine* engine,

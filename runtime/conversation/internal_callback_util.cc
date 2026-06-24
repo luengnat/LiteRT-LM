@@ -66,11 +66,7 @@ void SendMessage(
   }
   auto message = model_data_processor.ToMessage(
       Responses(TaskState::kProcessing, {std::string(text)}), processor_args);
-  if (!message.ok()) {
-    user_callback(message.status());
-    return;
-  }
-  user_callback(std::move(message.value()));
+  user_callback(std::move(message));
 }
 
 // Sends streamed text associated with a specific channel. It wraps the text in
@@ -249,7 +245,9 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
     absl::AnyInvocable<void(absl::StatusOr<Message>)> user_callback,
     absl::AnyInvocable<void()> cancel_callback,
     absl::AnyInvocable<void(Message)> complete_message_callback,
-    const std::optional<std::string>& open_channel_name) {
+    const std::optional<std::string>& open_channel_name,
+    bool return_error_on_max_tokens_reached, bool stream_tool_calls,
+    absl::string_view tool_call_channel_name) {
   auto channels = GetChannels(model_data_processor, custom_channels);
 
   bool initial_inside_channel = false;
@@ -279,7 +277,11 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
           active_channel_start_pos = size_t(0),
           active_channel_start_size = size_t(0),
           active_channel_name = std::move(initial_active_channel_name),
-          open_channel_name](absl::StatusOr<Responses> responses) mutable {
+          open_channel_name, return_error_on_max_tokens_reached,
+          stream_tool_calls,
+          tool_call_channel_name = std::string(tool_call_channel_name),
+          tool_call_stream_cursor =
+              size_t(0)](absl::StatusOr<Responses> responses) mutable {
     if (!responses.ok()) {
       // If the error is due to cancellation, then we should trigger the cancel
       // callback for removing the last message from the history.
@@ -298,11 +300,23 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
       return;
     }
 
+    if (responses->GetTaskState() == TaskState::kMaxNumTokensReached) {
+      if (return_error_on_max_tokens_reached) {
+        if (cancel_callback) {
+          cancel_callback();
+        }
+        user_callback(absl::ResourceExhaustedError(
+            "Max number of tokens reached, context window out of bounds"));
+        return;
+      }
+    }
+
     // If there are no more new responses, it means the model has finished
     // generating content, trigger the complete message callback and return an
     // OK status to indicate the inference is done.
     if (responses->GetTaskState() == TaskState::kDone ||
-        responses->GetTaskState() == TaskState::kMaxNumTokensReached) {
+        (!return_error_on_max_tokens_reached &&
+         responses->GetTaskState() == TaskState::kMaxNumTokensReached)) {
       SendCompleteMessage(user_callback, accumulated_response_text,
                           model_data_processor, processor_args, cursor,
                           complete_message_callback,
@@ -348,6 +362,11 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
             active_channel_start_pos = channel_start_pos;
             active_channel_start_size = next_channel->start.size();
             active_channel_name = next_channel->channel_name;
+
+            if (active_channel_name.empty()) {
+              tool_call_stream_cursor =
+                  channel_start_pos + next_channel->start.size();
+            }
 
             // For custom channels, move the cursor past the start delimiter so
             // that it is not included in the resulting streamed content.
@@ -410,6 +429,13 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
                                        .substr(cursor, end_pos - cursor),
                                    active_channel_name);
             } else {
+              if (stream_tool_calls && end_pos > tool_call_stream_cursor) {
+                SendMessageToChannel(user_callback,
+                                     accumulated_response_text.substr(
+                                         tool_call_stream_cursor,
+                                         end_pos - tool_call_stream_cursor),
+                                     tool_call_channel_name);
+              }
               // Treat as tool call: include everything up to and including the
               // end delimiter.
               SendMessage(
@@ -431,6 +457,19 @@ absl::AnyInvocable<void(absl::StatusOr<Responses>)> CreateInternalCallback(
               StreamActiveChannel(user_callback, accumulated_response_text,
                                   search_start, cursor, active_channel_end,
                                   active_channel_name);
+            } else if (stream_tool_calls) {
+              size_t overlap = SuffixPrefixOverlap(
+                  accumulated_response_text.substr(search_start),
+                  active_channel_end);
+              size_t safe_end = accumulated_response_text.size() - overlap;
+              if (safe_end > tool_call_stream_cursor) {
+                SendMessageToChannel(user_callback,
+                                     accumulated_response_text.substr(
+                                         tool_call_stream_cursor,
+                                         safe_end - tool_call_stream_cursor),
+                                     tool_call_channel_name);
+                tool_call_stream_cursor = safe_end;
+              }
             }
 
             // Break for the next token.

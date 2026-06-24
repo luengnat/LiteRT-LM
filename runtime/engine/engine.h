@@ -24,7 +24,7 @@
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
 #include "absl/time/time.h"  // from @com_google_absl
-#include "runtime/components/tokenizer.h"
+#include "support/tokenizer/tokenizer.h"  // from @litert
 #include "runtime/engine/engine_settings.h"
 #include "runtime/engine/io_types.h"
 
@@ -181,6 +181,19 @@ class SessionInterface {
     return absl::UnimplementedError("Not implemented.");
   }
 
+  // Similar to RunPrefillAsync, but accepts preprocessed (e.g., tokenized)
+  // contents.
+  // This is a non-blocking call and the function will return right away. The
+  // processing status will be signaled through the callback.
+  // - preprocessed_contents: The preprocessed input data.
+  // - callback: Callback to receive the prefill results.
+  virtual absl::StatusOr<std::unique_ptr<TaskController>>
+  PrefillPreprocessedContents(
+      std::vector<InputData> preprocessed_contents,
+      absl::AnyInvocable<void(absl::StatusOr<Responses>)> callback) {
+    return absl::UnimplementedError("Not implemented.");
+  }
+
   // Starts the decoding process for the model to predict the response based
   // on the input prompt/query added after using RunPrefill* functions.
   // This is a blocking call and the function will return when the decoding
@@ -278,6 +291,11 @@ class SessionInterface {
     return absl::UnimplementedError("RewindToCheckpoint not implemented.");
   }
 
+  // Rewinds the session to a specific step number.
+  virtual absl::Status RewindToStep(int step) {
+    return absl::UnimplementedError("RewindToStep not implemented.");
+  }
+
   // Get the current step of the session.
   virtual absl::StatusOr<int> GetCurrentStep() const {
     return absl::UnimplementedError("GetCurrentStep not implemented.");
@@ -319,7 +337,7 @@ class EngineT {
   virtual const EngineSettings& GetEngineSettings() const = 0;
 
   // Get the reference to the tokenizer for the engine.
-  virtual const Tokenizer& GetTokenizer() const = 0;
+  virtual const support::Tokenizer& GetTokenizer() const = 0;
 
   // Get the audio model properties for the session. This is only available
   // if the engine is created with audio modality enabled.

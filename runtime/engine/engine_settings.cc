@@ -30,8 +30,8 @@
 #include "absl/strings/str_cat.h"  // from @com_google_absl
 #include "absl/strings/str_split.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
+#include "support/tokenizer/tokenizer.h"  // from @litert
 #include "runtime/components/model_resources.h"
-#include "runtime/components/tokenizer.h"
 #include "runtime/executor/audio_executor_settings.h"
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/llm_executor_settings.h"
@@ -223,7 +223,7 @@ absl::StatusOr<EngineSettings> EngineSettings::CreateDefault(
 // 1. The tokenizer is available.
 // 2. The tokenizer is not available, when it is nullptr.
 absl::Status EngineSettings::MaybeUpdateAndValidate(
-    Tokenizer* tokenizer,
+    support::Tokenizer* tokenizer,
     const proto::LlmMetadata* absl_nullable metadata_from_file,
     absl::string_view input_prompt_as_hint,
     const std::optional<std::string>& text_backend_constraint,
@@ -324,10 +324,10 @@ absl::Status EngineSettings::MaybeUpdateAndValidate(
   }
 
   // Set the default values for the sampler params.
+  Backend backend = main_executor_settings_.GetBackend();
   if (!metadata.has_sampler_params()) {
     proto::SamplerParameters& sampler_params =
         *metadata.mutable_sampler_params();
-    Backend backend = main_executor_settings_.GetBackend();
     if (backend == Backend::NPU || backend == Backend::GPU_ARTISAN) {
       sampler_params.set_type(proto::SamplerParameters::TYPE_UNSPECIFIED);
     } else if (backend == Backend::CPU || backend == Backend::GPU
@@ -341,6 +341,13 @@ absl::Status EngineSettings::MaybeUpdateAndValidate(
       return absl::InvalidArgumentError(
           absl::StrCat("Not recognized backend: ", backend));
     }
+  }
+
+  if (metadata.sampler_params().type() ==
+          proto::SamplerParameters::TYPE_UNSPECIFIED &&
+      (backend == Backend::CPU || backend == Backend::GPU)) {
+    metadata.mutable_sampler_params()->set_type(
+        proto::SamplerParameters::TOP_P);
   }
 
   if (!metadata.has_llm_model_type()) {
@@ -545,7 +552,8 @@ bool EngineSettings::GetSingleThreadedExecution() const {
   return single_threaded_execution_;
 }
 
-void EngineSettings::SetSingleThreadedExecution(bool single_threaded_execution) {
+void EngineSettings::SetSingleThreadedExecution(
+    bool single_threaded_execution) {
   single_threaded_execution_ = single_threaded_execution;
 }
 
@@ -579,6 +587,24 @@ absl::Status SessionConfig::MaybeUpdateAndValidate(
     if ((sampler_params.type() == proto::SamplerParameters::TYPE_UNSPECIFIED)) {
       if (llm_metadata.has_sampler_params()) {
         sampler_params = engine_settings.GetLlmMetadata()->sampler_params();
+      }
+    }
+    if (sampler_backend_ == Backend::UNSPECIFIED) {
+      proto::SamplerParameters::Backend backend_to_use =
+          sampler_params.backend();
+      if (backend_to_use == proto::SamplerParameters::UNSPECIFIED &&
+          llm_metadata.has_sampler_params()) {
+        // Prefer the sampler backend from user-provided value, and only if the
+        // user-provided value is unspecified, use the value from LlmMetadata.
+        backend_to_use = llm_metadata.sampler_params().backend();
+      }
+      // If the sampler backend is still unspecified, then it will be set later
+      // based on the main executor settings.
+      if (backend_to_use != proto::SamplerParameters::UNSPECIFIED) {
+        ASSIGN_OR_RETURN(
+            sampler_backend_,
+            GetBackendFromString(
+                proto::SamplerParameters::Backend_Name(backend_to_use)));
       }
     }
 
@@ -635,6 +661,8 @@ absl::Status SessionConfig::MaybeUpdateAndValidate(
         num_output_candidates_));
   }
 
+  // If the sampler backend is not specified, then use the same backend as the
+  // main executor settings.
   if (sampler_backend_ == Backend::UNSPECIFIED) {
     if (engine_settings.GetMainExecutorSettings().GetBackend() ==
         Backend::GPU) {
@@ -706,6 +734,15 @@ void SessionConfig::SetScopedLoraFile(
   scoped_lora_file_ = std::move(scoped_lora_file);
 }
 
+std::shared_ptr<ScopedFile> SessionConfig::GetAudioScopedLoraFile() const {
+  return scoped_audio_lora_file_;
+}
+
+void SessionConfig::SetAudioScopedLoraFile(
+    std::shared_ptr<ScopedFile> scoped_audio_lora_file) {
+  scoped_audio_lora_file_ = std::move(scoped_audio_lora_file);
+}
+
 std::ostream& operator<<(std::ostream& os, const SessionConfig& config) {
   os << "SessionConfig: " << std::endl;
   os << "  AudioModalityEnabled: " << config.AudioModalityEnabled()
@@ -730,6 +767,9 @@ std::ostream& operator<<(std::ostream& os, const SessionConfig& config) {
      << config.GetApplyPromptTemplateInSession() << std::endl;
   os << "  ScopedLoraFile: "
      << (config.GetScopedLoraFile() != nullptr ? "Present" : "Not present")
+     << std::endl;
+  os << "  ScopedAudioLoraFile: "
+     << (config.GetAudioScopedLoraFile() != nullptr ? "Present" : "Not present")
      << std::endl;
   return os;
 }

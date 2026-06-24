@@ -72,6 +72,7 @@ struct LiteRtLmSettings {
   std::optional<std::string> audio_backend = std::nullopt;
   std::string sampler_backend = "";
   std::string model_path;
+  std::optional<std::string> model_name = std::nullopt;
   bool load_model_from_descriptor = false;
   std::string input_prompt = "What is the tallest building in the world?";
   std::optional<std::string> expected_output = std::nullopt;
@@ -102,6 +103,8 @@ struct LiteRtLmSettings {
   std::optional<std::string> score_target_text = std::nullopt;
   bool gpu_madvise_original_shared_tensors = true;
   bool disable_cache = false;
+  bool disable_weight_cache = false;
+  bool disable_gpu_program_cache = false;
   std::string cache_dir = "";
   int prefill_chunk_size = -1;
   std::string preferred_device_substr = "";

@@ -17,6 +17,7 @@ import ctypes
 
 from . import interfaces
 from ._ffi import _get_lib
+from ._ffi import ActivationDataType
 from ._ffi import InputDataType
 from ._ffi import LiteRtLmInputData
 
@@ -41,7 +42,21 @@ class Benchmark(interfaces.AbstractBenchmark):
           f" (model_path={model_path}, backend={backend_str})"
       )
 
+    if self.activation_data_type is not None:
+      lib.litert_lm_engine_settings_set_activation_data_type(
+          settings, self.activation_data_type.value
+      )
+
     lib.litert_lm_engine_settings_enable_benchmark(settings)
+
+    if (
+        isinstance(self.backend, interfaces.CPU)
+        and self.backend.thread_count is not None
+    ):
+      lib.litert_lm_engine_settings_set_num_threads(
+          settings, self.backend.thread_count
+      )
+
     if self.max_num_tokens is not None:
       lib.litert_lm_engine_settings_set_max_num_tokens(
           settings, self.max_num_tokens
@@ -71,13 +86,13 @@ class Benchmark(interfaces.AbstractBenchmark):
           f"Failed to create session for benchmark (model_path={model_path})"
       )
 
-    dummy_prompt = b"benchmark"
+    prompt = self.prompt.encode("utf-8")
     input_data = LiteRtLmInputData()
     input_data.type = InputDataType.TEXT
     input_data.data = ctypes.cast(
-        ctypes.c_char_p(dummy_prompt), ctypes.c_void_p
+        ctypes.c_char_p(prompt), ctypes.c_void_p
     )
-    input_data.size = len(dummy_prompt)
+    input_data.size = len(prompt)
 
     responses = lib.litert_lm_session_generate_content(
         session_ptr, ctypes.byref(input_data), 1

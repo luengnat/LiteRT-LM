@@ -49,6 +49,11 @@ ABSL_FLAG(std::string, backend, "cpu",
           "Executor backend to use for LLM execution (cpu, gpu, etc.)");
 ABSL_FLAG(std::string, model_path, "", "Model path to use for LLM execution.");
 ABSL_FLAG(
+    std::optional<std::string>, model_name, std::nullopt,
+    "The name of the model being tested. In Chrome performance tests, this "
+    "name is added to performance metrics to distinguish between different "
+    "models.");
+ABSL_FLAG(
     bool, load_model_from_descriptor, false,
     "Whether to load the model from a file descriptor rather than by path.");
 ABSL_FLAG(std::string, input_prompt, "",
@@ -182,6 +187,8 @@ absl::Status MainHelper(int argc, char** argv) {
            "[--litert_dispatch_lib_dir=<litert_dispatch_lib_dir>]"
            "[--sampler_handles_input=<true|false>]"
            "[--disable_cache=<true|false>]"
+           "[--disable_weight_cache=<true|false>]"
+           "[--disable_gpu_program_cache=<true|false>]"
            "[--cache_compiled_shader_only=<true|false>]"
            "[--conv_type=<auto|float|int8>]"
            "[--enable_speculative_decoding=<true|false>]";
@@ -200,6 +207,7 @@ absl::Status MainHelper(int argc, char** argv) {
   settings.audio_backend = absl::GetFlag(FLAGS_audio_backend);
   settings.sampler_backend = absl::GetFlag(FLAGS_sampler_backend);
   settings.model_path = absl::GetFlag(FLAGS_model_path);
+  settings.model_name = absl::GetFlag(FLAGS_model_name);
   settings.load_model_from_descriptor =
       absl::GetFlag(FLAGS_load_model_from_descriptor);
   settings.input_prompt = GetInputPrompt();
@@ -237,6 +245,9 @@ absl::Status MainHelper(int argc, char** argv) {
   settings.gpu_madvise_original_shared_tensors =
       absl::GetFlag(FLAGS_gpu_madvise_original_shared_tensors);
   settings.disable_cache = absl::GetFlag(FLAGS_disable_cache);
+  settings.disable_weight_cache = absl::GetFlag(FLAGS_disable_weight_cache);
+  settings.disable_gpu_program_cache =
+      absl::GetFlag(FLAGS_disable_gpu_program_cache);
   settings.cache_dir = absl::GetFlag(FLAGS_cache_dir);
   settings.cache_compiled_shaders_only =
       absl::GetFlag(FLAGS_cache_compiled_shaders_only);

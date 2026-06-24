@@ -15,7 +15,6 @@
 #include "runtime/executor/llm_executor_settings_utils.h"
 
 #include <cstdint>
-#include <filesystem>  // NOLINT
 #include <memory>
 #include <optional>
 #include <string>
@@ -97,12 +96,16 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
           executor_settings.GetModelAssets().GetScopedFile().value()->IsValid();
 
       auto program_cache_file = executor_settings.GetProgramCacheFile(
-          ExecutorSettingsBase::kMlDriftCacheSuffix, /*check_and_clean=*/true);
+          cache_suffix.value_or("") +
+              std::string(ExecutorSettingsBase::kMlDriftCacheSuffix),
+          /*check_and_clean=*/true);
       bool has_valid_program_cache_fd =
           program_cache_file.ok() &&
           !std::holds_alternative<std::string>(*program_cache_file);
       auto weight_cache_file = executor_settings.GetWeightCacheFile(
-          ExecutorSettingsBase::kMlDriftCacheSuffix, /*check_and_clean=*/true);
+          cache_suffix.value_or("") +
+              std::string(ExecutorSettingsBase::kMlDriftWeightCacheSuffix),
+          /*check_and_clean=*/true);
       bool has_valid_weight_cache_fd =
           weight_cache_file.ok() &&
           !std::holds_alternative<std::string>(*weight_cache_file);
@@ -126,6 +129,10 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
                 *executor_settings.GetModelAssets().GetScopedFile().value()));
         cache_key = absl::StrCat("fd_", metadata_id);
       }
+      if (cache_suffix.has_value() && !cache_suffix->empty() &&
+          !cache_key.empty()) {
+        absl::StrAppend(&cache_key, *cache_suffix);
+      }
 
       AdvancedSettings advanced_settings;
       if (executor_settings.GetAdvancedSettings()) {
@@ -146,6 +153,7 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
         // This option prevents KVCache handling from being affected by
         // BHWC conversion in NoExternalTensorsMode.
         gpu_compilation_options.AddExternalTensorPattern("kv_cache_");
+        gpu_compilation_options.AddBufferStorageTensorPattern("kv_cache_c_");
         if (signatures.has_value() &&
             signatures.value()->input_int32_param.has_value()) {
           gpu_compilation_options.AddBufferStorageTensorPattern("kv_cache_");
@@ -243,7 +251,7 @@ absl::StatusOr<litert::Options> CreateCompilationOptions(
       auto default_xnn_options = TfLiteXNNPackDelegateOptionsDefault();
       cpu_compilation_options.SetXNNPackFlags(
           default_xnn_options.flags |
-          TFLITE_XNNPACK_DELEGATE_FLAG_ENABLE_LATEST_OPERATORS);
+          TFLITE_XNNPACK_DELEGATE_FLAG_DYNAMIC_FULLY_CONNECTED);
       LITERT_ASSIGN_OR_RETURN(auto& runtime_options,
                               compilation_options.GetRuntimeOptions());
       runtime_options.SetCompressQuantizationZeroPoints(true);

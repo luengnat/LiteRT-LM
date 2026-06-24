@@ -421,6 +421,18 @@ class Conversation(
   }
 
   /**
+   * Gets the number of tokens in the conversation KV Cache (prefill + decode).
+   *
+   * @return The number of tokens.
+   * @throws IllegalStateException if the conversation is not alive.
+   * @throws LiteRtLmJniException if an error occurs during the native call.
+   */
+  fun getTokenCount(): Int {
+    checkIsAlive()
+    return LiteRtLmJni.nativeConversationGetTokenCount(handle)
+  }
+
+  /**
    * Renders the message into a string for testing and logging.
    *
    * This function does not need to be called for actual message sending, as the `SendMessage` and
@@ -444,6 +456,19 @@ class Conversation(
       message.toJson().toString(),
       extraContextJsonString,
     )
+  }
+
+  /**
+   * Renders the preface into a string for testing and logging.
+   *
+   * @return The rendered preface string.
+   * @throws IllegalStateException if the conversation is not alive.
+   * @throws LiteRtLmJniException if an error occurs during the native call.
+   */
+  @ExperimentalApi
+  fun renderPrefaceIntoString(): String {
+    checkIsAlive()
+    return LiteRtLmJni.nativeConversationRenderPrefaceIntoString(handle)
   }
 
   /**

@@ -75,6 +75,7 @@ internal object LiteRtLmJni {
    * @param decodeTokens The number of tokens to decode.
    * @param cacheDir The directory for cache files.
    * @param mainNpuNativeLibraryDir The directory for the main backend NPU libraries.
+   * @param enableSpeculativeDecoding Whether to enable speculative decoding.
    * @return A pointer to the native engine instance.
    */
   external fun nativeCreateBenchmark(
@@ -84,6 +85,7 @@ internal object LiteRtLmJni {
     decodeTokens: Int,
     cacheDir: String,
     mainNpuNativeLibraryDir: String,
+    enableSpeculativeDecoding: Boolean?,
   ): Long
 
   /**
@@ -98,9 +100,16 @@ internal object LiteRtLmJni {
    *
    * @param enginePointer A pointer to the native engine instance.
    * @param samplerConfig The sampler configuration.
+   * @param loraPath Path to the LoRA weights file.
+   * @param audioLoraPath Path to the Audio LoRA weights file.
    * @return A pointer to the native session instance.
    */
-  external fun nativeCreateSession(enginePointer: Long, samplerConfig: SamplerConfig?): Long
+  external fun nativeCreateSession(
+    enginePointer: Long,
+    samplerConfig: SamplerConfig?,
+    loraPath: String?,
+    audioLoraPath: String?,
+  ): Long
 
   /**
    * Delete the LiteRT-LM session.
@@ -208,6 +217,8 @@ internal object LiteRtLmJni {
     enableConversationConstrainedDecoding: Boolean,
     filterChannelContentFromKvCache: Boolean,
     overwritePromptTemplate: String?,
+    loraPath: String?,
+    audioLoraPath: String?,
   ): Long
 
   /**
@@ -273,6 +284,15 @@ internal object LiteRtLmJni {
   external fun nativeConversationGetBenchmarkInfo(conversationPointer: Long): BenchmarkInfo
 
   /**
+   * Gets the number of tokens in the conversation KV Cache.
+   *
+   * @param conversationPointer A pointer to the native conversation instance.
+   * @return The number of tokens.
+   * @throws LiteRtLmJniException if the underlying native method fails.
+   */
+  external fun nativeConversationGetTokenCount(conversationPointer: Long): Int
+
+  /**
    * Renders the message into a string for testing purposes.
    *
    * @param conversationPointer A pointer to the native conversation instance.
@@ -285,6 +305,14 @@ internal object LiteRtLmJni {
     messageJsonString: String,
     extraContextJsonString: String,
   ): String
+
+  /**
+   * Renders the preface into a string for testing purposes.
+   *
+   * @param conversationPointer A pointer to the native conversation instance.
+   * @return The rendered preface string.
+   */
+  external fun nativeConversationRenderPrefaceIntoString(conversationPointer: Long): String
 
   /**
    * Callback for the nativeSendMessageAsync.

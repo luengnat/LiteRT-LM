@@ -61,6 +61,7 @@
 #include "runtime/executor/vision_executor_settings.h"
 #include "runtime/util/convert_tensor_buffer.h"
 #include "runtime/util/file_util.h"
+#include "tflite/delegates/xnnpack/xnnpack_delegate.h"  // from @litert
 #include "runtime/util/status_macros.h"  // NOLINT
 
 namespace litert::lm {
@@ -106,6 +107,18 @@ absl::Status SetGpuOptions(const VisionExecutorSettings& executor_settings,
 #endif  // !__APPLE__
   gpu_options.SetMadviseOriginalSharedTensors(true);
   gpu_options.SetConvertWeightsOnGpu(true);
+  return absl::OkStatus();
+}
+
+// Set the default CPU options for the model.
+absl::Status SetCpuOptions(const VisionExecutorSettings& executor_settings,
+                           litert::CpuOptions& cpu_options) {
+  // Set the number of threads to 4 by default.
+  cpu_options.SetNumThreads(4);
+  auto default_xnn_options = TfLiteXNNPackDelegateOptionsDefault();
+  cpu_options.SetXNNPackFlags(
+      default_xnn_options.flags |
+      TFLITE_XNNPACK_DELEGATE_FLAG_DYNAMIC_FULLY_CONNECTED);
   return absl::OkStatus();
 }
 
@@ -213,8 +226,7 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
     case Backend::CPU: {
       // TODO: b/403132820 - Add accelerator compilation options for XNNPACK.
       LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
-      // Set the number of threads to 4 by default.
-      cpu_options.SetNumThreads(4);
+      RETURN_IF_ERROR(SetCpuOptions(vision_executor_settings_, cpu_options));
       RETURN_IF_ERROR(SetCpuCacheOptions(
           weight_cache_file,
           /*logging_prefix=*/VisionExecutorSettings::kEncoderName,
@@ -225,26 +237,14 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionEncoder::Initialize() {
     case Backend::GPU: {
       // TODO: b/403132820 - Add accelerator compilation options for ML_DRIFT.
       LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
-      ASSIGN_OR_RETURN(auto model_path,
-                       vision_executor_settings_.GetModelAssets().GetPath());
-      absl::string_view model_basename = Basename(model_path);
-      LITERT_ASSIGN_OR_RETURN(std::string metadata_id,
-                              GetFileCacheIdentifier(model_path));
-      std::string cache_key =
-          absl::StrCat(model_basename, VisionExecutorSettings::kEncoderName,
-                       "_", metadata_id);
-      ABSL_LOG(INFO) << "Vision cache key: " << cache_key;
-      auto program_cache_file = vision_executor_settings_.GetProgramCacheFile(
-          absl::StrCat(VisionExecutorSettings::kEncoderName,
-                       ExecutorSettingsBase::kMlDriftCacheSuffix),
-          /*check_and_clean=*/true);
-      auto weight_cache_file = vision_executor_settings_.GetWeightCacheFile(
-          absl::StrCat(VisionExecutorSettings::kEncoderName,
-                       ExecutorSettingsBase::kMlDriftCacheSuffix),
-          /*check_and_clean=*/true);
+      ASSIGN_OR_RETURN(
+          const auto cache_files,
+          GetGpuModelCacheData(vision_executor_settings_,
+                               VisionExecutorSettings::kEncoderName));
       RETURN_IF_ERROR(SetGpuOptions(vision_executor_settings_, gpu_options));
       RETURN_IF_ERROR(SetGpuCacheOptions(
-          weight_cache_file, program_cache_file, cache_key,
+          cache_files.weight_cache_file, cache_files.program_cache_file,
+          cache_files.cache_key,
           /*logging_prefix=*/VisionExecutorSettings::kEncoderName,
           /*cache_compiled_shaders_only=*/false, gpu_options));
       options.SetHardwareAccelerators(litert::HwAccelerators::kGpu);
@@ -307,8 +307,7 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionAdapter::Initialize() {
     case Backend::CPU: {
       // TODO: b/403132820 - Add accelerator compilation options for XNNPACK.
       LITERT_ASSIGN_OR_RETURN(auto& cpu_options, options.GetCpuOptions());
-      // Set the number of threads to 4 by default.
-      cpu_options.SetNumThreads(4);
+      RETURN_IF_ERROR(SetCpuOptions(vision_executor_settings_, cpu_options));
       RETURN_IF_ERROR(SetCpuCacheOptions(weight_cache_file,
                                          VisionExecutorSettings::kAdapterName,
                                          cpu_options));
@@ -317,25 +316,13 @@ absl::Status VisionLiteRtCompiledModelExecutor::VisionAdapter::Initialize() {
     }
     case Backend::GPU: {
       LITERT_ASSIGN_OR_RETURN(auto& gpu_options, options.GetGpuOptions());
-      LITERT_RETURN_IF_ERROR(
-          SetGpuOptions(vision_executor_settings_, gpu_options));
-      ASSIGN_OR_RETURN(auto model_path,
-                       vision_executor_settings_.GetModelAssets().GetPath());
-      absl::string_view model_basename = Basename(model_path);
-      auto program_cache_file = vision_executor_settings_.GetProgramCacheFile(
-          absl::StrCat(VisionExecutorSettings::kAdapterName,
-                       ExecutorSettingsBase::kMlDriftCacheSuffix),
-          /*check_and_clean=*/true);
-      auto weight_cache_file = vision_executor_settings_.GetWeightCacheFile(
-          absl::StrCat(VisionExecutorSettings::kAdapterName,
-                       ExecutorSettingsBase::kMlDriftCacheSuffix),
-          /*check_and_clean=*/true);
-      ASSIGN_OR_RETURN(std::string metadata_id,
-                       GetFileCacheIdentifier(model_path));
+      ASSIGN_OR_RETURN(
+          const auto cache_files,
+          GetGpuModelCacheData(vision_executor_settings_,
+                               VisionExecutorSettings::kAdapterName));
       RETURN_IF_ERROR(SetGpuCacheOptions(
-          weight_cache_file, program_cache_file,
-          absl::StrCat(model_basename, VisionExecutorSettings::kAdapterName,
-                       "_", metadata_id),
+          cache_files.weight_cache_file, cache_files.program_cache_file,
+          cache_files.cache_key,
           /*logging_prefix=*/VisionExecutorSettings::kAdapterName,
           /*cache_compiled_shaders_only=*/false, gpu_options));
 

@@ -44,6 +44,7 @@ pytype_strict_library(
     srcs = ["model.py"],
     deps = [
         "//python/litert_lm",
+        "//python/litert_lm_builder:litertlm_builder",
         "//python/litert_lm_builder:litertlm_peek",
         requirement("click"),
     ],
@@ -79,9 +80,17 @@ pytype_strict_library(
 pytype_strict_library(
     name = "common",
     srcs = ["common.py"],
+    deps = [requirement("click")],
+    imports = [".."],
+)
+
+pytype_strict_library(
+    name = "huggingface_download",
+    srcs = ["huggingface_download.py"],
     deps = [
+        ":common",
+        ":model",
         requirement("click"),
-        requirement("huggingface_hub"),
     ],
     imports = [".."],
 )
@@ -93,6 +102,74 @@ py_test(
     deps = [
         ":venv_manager",
         "@absl_py//absl/testing:absltest",
+    ],
+    imports = [".."],
+)
+
+py_test(
+    name = "common_test",
+    srcs = ["common_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":common",
+        "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
+        requirement("click"),
+    ],
+    imports = [".."],
+)
+
+py_test(
+    name = "model_test",
+    srcs = ["model_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":model",
+        "//python/litert_lm",
+        "//python/litert_lm_builder:litertlm_builder",
+        "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
+    ],
+)
+
+py_test(
+    name = "huggingface_download_test",
+    srcs = ["huggingface_download_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":huggingface_download",
+        ":model",
+        "@absl_py//absl/testing:absltest",
+        requirement("click"),
+    ],
+    imports = [".."],
+)
+
+pytype_strict_library(
+    name = "cli_helpers",
+    srcs = ["cli_helpers.py"],
+    deps = [
+        ":huggingface_download",
+        ":model",
+        requirement("click"),
+        requirement("prompt_toolkit"),
+        requirement("questionary"),
+    ],
+    imports = [".."],
+)
+
+py_test(
+    name = "cli_helpers_test",
+    srcs = ["cli_helpers_test.py"],
+    tags = ["nowindows"],
+    deps = [
+        ":cli_helpers",
+        ":huggingface_download",
+        ":model",
+        "@absl_py//absl/testing:absltest",
+        requirement("click"),
+        requirement("prompt_toolkit"),
+        requirement("questionary"),
     ],
     imports = [".."],
 )
@@ -112,7 +189,7 @@ pytype_strict_library(
         "//python/litert_lm_cli/commands:benchmark",
         "//python/litert_lm_cli/commands:convert",
         "//python/litert_lm_cli/commands:delete",
-        "//python/litert_lm_cli/commands:import",
+        "//python/litert_lm_cli/commands:import",  # fixdeps: keep
         "//python/litert_lm_cli/commands:list",
         "//python/litert_lm_cli/commands:rename",
         "//python/litert_lm_cli/commands:run",
@@ -132,6 +209,7 @@ py_test(
         ":common",
         ":main_lib",
         ":model",
+        "//python/litert_lm",
         "//python/litert_lm_cli/commands:run",
         "@absl_py//absl/testing:absltest",
         requirement("click"),
@@ -172,6 +250,7 @@ py_wheel(
     }),
     platform = "any",
     python_tag = "py3",
+    python_requires = ">=3.10",
     summary = "LiteRT-LM command line tool",
     description_file = "README.md",
     license = "Apache-2.0",
@@ -200,7 +279,8 @@ genrule(
         "//conditions:default": "echo 'litert-lm-api==" + VERSION + "' > $@ && echo 'litert-lm-builder==" + VERSION + "' >> $@",
     }) + """
         echo 'click' >> $@
-        echo 'huggingface_hub' >> $@
         echo 'prompt_toolkit' >> $@
+        echo 'typing-extensions' >> $@
+        echo 'questionary' >> $@
     """,
 )

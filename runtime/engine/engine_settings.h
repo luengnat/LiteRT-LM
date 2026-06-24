@@ -26,7 +26,7 @@
 #include "absl/status/status.h"  // from @com_google_absl
 #include "absl/status/statusor.h"  // from @com_google_absl
 #include "absl/strings/string_view.h"  // from @com_google_absl
-#include "runtime/components/tokenizer.h"
+#include "support/tokenizer/tokenizer.h"  // from @litert
 #include "runtime/executor/audio_executor_settings.h"
 #include "runtime/executor/executor_settings_base.h"
 #include "runtime/executor/llm_executor_settings.h"
@@ -85,7 +85,7 @@ class EngineSettings {
   // assets. The function also validates to check if all of the required fields
   // are set correctly. Returns an error if the validation fails.
   absl::Status MaybeUpdateAndValidate(
-      Tokenizer* tokenizer,
+      support::Tokenizer* tokenizer,
       const proto::LlmMetadata* absl_nullable metadata_from_file,
       absl::string_view input_prompt_as_hint = "",
       const std::optional<std::string>& text_backend_constraint = std::nullopt,
@@ -256,6 +256,12 @@ class SessionConfig {
   std::shared_ptr<ScopedFile> GetScopedLoraFile() const;
   void SetScopedLoraFile(std::shared_ptr<ScopedFile> scoped_lora_file);
 
+  // Scoped Audio LoRA file:
+  // Getters for the scoped audio LoRA file.
+  std::shared_ptr<ScopedFile> GetAudioScopedLoraFile() const;
+  void SetAudioScopedLoraFile(
+      std::shared_ptr<ScopedFile> scoped_audio_lora_file);
+
   // The maximum number of tokens to generate in a single request:
   // Getters for the max output tokens.
   int GetMaxOutputTokens() const { return max_output_tokens_; }
@@ -310,6 +316,9 @@ class SessionConfig {
 
   // Scoped file for the LoRA weights.
   std::shared_ptr<ScopedFile> scoped_lora_file_;
+
+  // Scoped file for the Audio LoRA weights.
+  std::shared_ptr<ScopedFile> scoped_audio_lora_file_;
 
   // The maximum number of tokens to generate in a single request. This limits
   // the number of decoding steps for a request, as opposed to

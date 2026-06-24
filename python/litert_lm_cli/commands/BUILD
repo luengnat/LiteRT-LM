@@ -25,6 +25,7 @@ package(default_visibility = ["//visibility:public"])
 pytype_strict_library(
     name = "serve",
     srcs = [
+        "gemini_handler.py",
         "openai_handler.py",
         "serve.py",
         "serve_util.py",
@@ -32,9 +33,11 @@ pytype_strict_library(
     imports = [".."],
     deps = [
         "//python/litert_lm",
+        "//python/litert_lm_builder:litertlm_peek",
         "//python/litert_lm_cli:help_formatter",
         "//python/litert_lm_cli:model",
         requirement("click"),
+        requirement("typing_extensions"),
     ],
 )
 
@@ -66,8 +69,10 @@ pytype_strict_library(
     srcs = ["import.py"],
     imports = [".."],
     deps = [
+        "//python/litert_lm_cli:cli_helpers",
         "//python/litert_lm_cli:common",
         "//python/litert_lm_cli:help_formatter",
+        "//python/litert_lm_cli:huggingface_download",
         "//python/litert_lm_cli:model",
         requirement("click"),
     ],
@@ -101,8 +106,10 @@ pytype_strict_library(
     imports = [".."],
     deps = [
         "//python/litert_lm",
+        "//python/litert_lm_cli:cli_helpers",
         "//python/litert_lm_cli:common",
         "//python/litert_lm_cli:help_formatter",
+        "//python/litert_lm_cli:huggingface_download",
         "//python/litert_lm_cli:model",
         requirement("click"),
     ] + select({
@@ -117,47 +124,17 @@ pytype_strict_library(
     deps = [
         ":convert",
         "//python/litert_lm",
+        "//python/litert_lm_builder:litertlm_builder",
+        "//python/litert_lm_cli:cli_helpers",
         "//python/litert_lm_cli:common",
         "//python/litert_lm_cli:help_formatter",
+        "//python/litert_lm_cli:huggingface_download",
         "//python/litert_lm_cli:model",
         requirement("click"),
         requirement("prompt_toolkit"),
     ] + select({
         "//conditions:default": [],
     }),
-)
-
-py_test(
-    name = "serve_gemini_integration_test",
-    srcs = ["serve_gemini_integration_test.py"],
-    data = ["//runtime/e2e_tests/data:gemma3-1b-it-int4-litertlm"],
-    tags = [
-        "manual",
-        "nomacos",
-        "nowindows",
-    ],
-    deps = [
-        ":serve",
-        "//python/litert_lm_cli:model",
-        "@absl_py//absl/testing:absltest",
-        "//third_party/py/google/genai",
-    ],
-)
-
-py_test(
-    name = "serve_openai_integration_test",
-    srcs = ["serve_openai_integration_test.py"],
-    data = ["//runtime/e2e_tests/data:gemma3-1b-it-int4-litertlm"],
-    tags = [
-        "manual",
-        "nomacos",
-        "nowindows",
-    ],
-    deps = [
-        ":serve",
-        "//python/litert_lm_cli:model",
-        "@absl_py//absl/testing:absltest",
-    ],
 )
 
 py_test(
@@ -173,5 +150,22 @@ py_test(
         ":serve",
         "//python/litert_lm_cli:model",
         "@absl_py//absl/testing:absltest",
+    ],
+)
+
+py_test(
+    name = "import_test",
+    srcs = ["import_test.py"],
+    tags = [
+        "nomacos",
+        "nowindows",
+    ],
+    deps = [
+        ":import",
+        "//python/litert_lm_cli:cli_helpers",
+        "//python/litert_lm_cli:huggingface_download",
+        "//python/litert_lm_cli:model",
+        "@absl_py//absl/testing:absltest",
+        requirement("click"),
     ],
 )

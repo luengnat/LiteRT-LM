@@ -42,10 +42,14 @@ data class Channel(val channelName: String, val start: String, val end: String) 
 sealed class Backend(val name: String) {
 
   /**
-   * @property numOfThreads The number of threads to use for CPU backend. When `null` or 0, use the
+   * @property threadCount The number of threads to use for CPU backend. When `null` or 0, use the
    *   default value from the native engine.
+   * @property numOfThreads Deprecated. Use [threadCount] instead.
    */
-  data class CPU(val numOfThreads: Int? = null) : Backend("CPU")
+  data class CPU(
+    val threadCount: Int? = null,
+    @Deprecated("Use threadCount instead", ReplaceWith("threadCount")) val numOfThreads: Int? = null,
+  ) : Backend("CPU")
 
   class GPU : Backend("GPU")
 
@@ -123,6 +127,7 @@ constructor(
   val automaticToolCalling: Boolean = true,
   val channels: List<Channel>? = null,
   val extraContext: Map<String, Any> = emptyMap(),
+  val loraConfig: LoraConfig? = null,
 )
 
 /**
@@ -147,9 +152,21 @@ data class SamplerConfig(
 }
 
 /**
+ * Configuration for LoRA (Low-Rank Adaptation) weights.
+ *
+ * @property loraPath Optional file path to the LoRA weights file.
+ * @property audioLoraPath Optional file path to the Audio LoRA weights file.
+ */
+data class LoraConfig(val loraPath: String? = null, val audioLoraPath: String? = null)
+
+/**
  * Configuration for a LiteRT-LM [Session].
  *
  * @property samplerConfig Configuration for the sampling process. If `null`, then uses the engine's
  *   default values.
+ * @property loraConfig Configuration for LoRA weights.
  */
-data class SessionConfig(val samplerConfig: SamplerConfig? = null)
+data class SessionConfig(
+  val samplerConfig: SamplerConfig? = null,
+  val loraConfig: LoraConfig? = null,
+)
